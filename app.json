@@ -27,7 +27,13 @@
     },
     "plugins": [
       "expo-router",
-      "expo-font"
+      "expo-font",
+      [
+        "expo-image-picker",
+        {
+          "photosPermission": "Allow $(PRODUCT_NAME) to access your photos to add pictures to your pins."
+        }
+      ]
     ],
     "scheme": "newera"
   }

@@ -1,6 +1,9 @@
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   content: ["./app/**/*.{js,jsx,ts,tsx}", "./src/**/*.{js,jsx,ts,tsx}"],
+  // `class` (not the default `media`) so our in-app toggle — setColorScheme via
+  // ThemeProvider — actually drives the `dark:` variant instead of only the OS.
+  darkMode: "class",
   presets: [require("nativewind/preset")],
   theme: {
     extend: {
