@@ -16,8 +16,10 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { AuthGate } from "@/components/AuthGate";
 import { PinDetails, type PinRecord } from "@/components/PinDetails";
 import { db } from "@/lib/db";
+import { useBootBlocker } from "@/lib/loading";
 import { useMapFocus } from "@/lib/mapFocus";
 import { ensureProfile, updateAvatar, type ProfileRecord } from "@/lib/profile";
+import { useTabBarHeight } from "@/lib/tabBar";
 
 // Playful backgrounds + emoji for pins that have no photo, so the collage
 // never turns into a wall of grey boxes.
@@ -127,6 +129,7 @@ function EmptyCollage() {
 function ProfileContent({ user }: { user: User }) {
   const router = useRouter();
   const { focusPin } = useMapFocus();
+  const barHeight = useTabBarHeight();
   const [uploading, setUploading] = useState(false);
   const [selected, setSelected] = useState<PinRecord | null>(null);
   const creatingRef = useRef(false);
@@ -142,6 +145,10 @@ function ProfileContent({ user }: { user: User }) {
       owner: {},
     },
   });
+
+  // Hold the boot splash until the pins/profile query lands, so the collage
+  // never flashes empty on a cold start.
+  useBootBlocker("profile", isLoading);
 
   const profile = (data?.profiles?.[0] ?? null) as ProfileRecord | null;
   const pins = (data?.pins ?? []) as unknown as PinRecord[];
@@ -284,7 +291,8 @@ function ProfileContent({ user }: { user: User }) {
         ListHeaderComponent={header}
         ListEmptyComponent={isLoading ? null : <EmptyCollage />}
         columnWrapperStyle={{ paddingHorizontal: 19 }}
-        contentContainerStyle={{ paddingBottom: 40 }}
+        // Clear the floating tab bar so the last pins aren't hidden under it.
+        contentContainerStyle={{ paddingBottom: barHeight + 24 }}
         showsVerticalScrollIndicator={false}
         // Virtualization: only tiles near the viewport are rendered.
         initialNumToRender={8}

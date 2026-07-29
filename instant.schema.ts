@@ -17,6 +17,10 @@ const _schema = i.schema({
       description: i.string(),
       latitude: i.number(),
       longitude: i.number(),
+      // ISO 3166-1 alpha-2 (e.g. "GE"), resolved when the pin is created.
+      // Indexed so search can rank same-country pins first. Optional because
+      // pins created before this field existed won't have it.
+      country: i.string().indexed().optional(),
       createdAt: i.number().indexed(),
     }),
     // Public profile for a signed-in user. One per $user.

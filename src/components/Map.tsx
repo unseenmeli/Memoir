@@ -11,8 +11,13 @@ import { PinComposer } from "@/components/PinComposer";
 import { PinDetails, type PinRecord } from "@/components/PinDetails";
 import { useMapFocus } from "@/lib/mapFocus";
 import { getLastRegion, setLastRegion } from "@/lib/mapRegion";
+import { useTheme } from "@/lib/theme";
 
 type Coordinate = { latitude: number; longitude: number };
+
+// Grace period after the map view lays out, for platforms where `onMapLoaded`
+// never fires (Apple Maps). Long enough for tiles to paint on a warm cache.
+const TILE_SETTLE_MS = 1200;
 
 /**
  * Full-bleed map. Apple Maps on iOS, Google Maps on Android.
@@ -20,8 +25,16 @@ type Coordinate = { latitude: number; longitude: number };
  *
  * Long-press the map to drop a new pin; tap a pin to see its details.
  */
-export function Map({ user }: { user: User }) {
+export function Map({
+  user,
+  onReady,
+}: {
+  user: User;
+  /** Fires once the native map has laid out and the pins query has landed. */
+  onReady?: () => void;
+}) {
   const { target, clear } = useMapFocus();
+  const { scheme } = useTheme();
   const mapRef = useRef<MapView>(null);
   // Keyed by pin id so we can open a specific pin's callout on demand.
   const markerRefs = useRef<Record<string, InstanceType<typeof Marker> | null>>(
@@ -30,11 +43,30 @@ export function Map({ user }: { user: User }) {
 
   const [draft, setDraft] = useState<Coordinate | null>(null);
   const [selected, setSelected] = useState<PinRecord | null>(null);
+  // `mapReady` = the native view laid out. `tilesLoaded` = it actually painted.
+  // Only the second one means there's a map to look at.
   const [mapReady, setMapReady] = useState(false);
+  const [tilesLoaded, setTilesLoaded] = useState(false);
 
-  const { data } = db.useQuery({
+  const { data, isLoading } = db.useQuery({
     pins: { photos: {}, owner: {} },
   });
+
+  // `onMapLoaded` is the real "tiles are painted" signal, but it only fires on
+  // Google-backed maps — on Apple Maps it may never arrive. So once the view
+  // has laid out, give the tiles a beat to draw and then accept that as loaded.
+  useEffect(() => {
+    if (!mapReady || tilesLoaded) return;
+    const timer = setTimeout(() => setTilesLoaded(true), TILE_SETTLE_MS);
+    return () => clearTimeout(timer);
+  }, [mapReady, tilesLoaded]);
+
+  // Report ready once the map has painted and the pins have arrived. On web the
+  // map never mounts, so fire immediately rather than blocking boot forever.
+  const ready = Platform.OS === "web" || (tilesLoaded && !isLoading);
+  useEffect(() => {
+    if (ready) onReady?.();
+  }, [ready, onReady]);
 
   // "Take me to the pin": once the map is ready, pan in tight and open the
   // pin's label. Gated on `mapReady` so it also works on the map's first mount.
@@ -86,7 +118,11 @@ export function Map({ user }: { user: User }) {
         initialRegion={getLastRegion()}
         onRegionChangeComplete={setLastRegion}
         showsUserLocation
+        // Native map tiles follow the app theme — without this the map stays
+        // bright white while everything around it goes dark.
+        userInterfaceStyle={scheme === "dark" ? "dark" : "light"}
         onMapReady={() => setMapReady(true)}
+        onMapLoaded={() => setTilesLoaded(true)}
         onLongPress={handleLongPress}
       >
         {pins.map((pin) => (

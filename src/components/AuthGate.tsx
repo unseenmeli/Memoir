@@ -1,8 +1,9 @@
 import type { User } from "@instantdb/react-native";
 import { useRouter } from "expo-router";
 import { useEffect } from "react";
-import { ActivityIndicator, Text, View } from "react-native";
+import { Text, View } from "react-native";
 import { db } from "@/lib/db";
+import { useBootBlocker } from "@/lib/loading";
 
 /**
  * Renders children only for a signed-in user, otherwise redirects to /login.
@@ -15,6 +16,10 @@ export function AuthGate({
   const router = useRouter();
   const { isLoading, error, user } = db.useAuth();
 
+  // Every tab screen renders through here, so this one blocker keeps the boot
+  // splash up until auth resolves on whichever page opens first.
+  useBootBlocker("auth", isLoading);
+
   useEffect(() => {
     if (!isLoading && !user) {
       router.replace("/login");
@@ -22,11 +27,8 @@ export function AuthGate({
   }, [isLoading, user, router]);
 
   if (isLoading) {
-    return (
-      <View className="flex-1 items-center justify-center bg-white dark:bg-zinc-950">
-        <ActivityIndicator />
-      </View>
-    );
+    // No spinner — the boot splash is covering the screen at this point.
+    return <View className="flex-1 bg-white dark:bg-zinc-950" />;
   }
 
   if (error) {

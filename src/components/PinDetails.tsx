@@ -23,6 +23,8 @@ export type PinRecord = {
   description: string;
   latitude: number;
   longitude: number;
+  /** ISO 3166-1 alpha-2. Absent on pins created before the field existed. */
+  country?: string | null;
   createdAt: number;
   photos: PinPhoto[];
   // `owner` is a has-one link, so Instant returns a single object (or null).

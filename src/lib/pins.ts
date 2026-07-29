@@ -1,5 +1,6 @@
 import { id } from "@instantdb/react-native";
 import type { ImagePickerAsset } from "expo-image-picker";
+import { fetchCountry } from "./country";
 import { db } from "./db";
 
 /** Per-user cap on how many pins someone can create. */
@@ -52,6 +53,11 @@ export async function createPin(
     fileIds.push(await uploadPhoto(pinId, input.photos[i], i));
   }
 
+  // Stamp the pin with the creator's country so search can rank same-country
+  // results first. Best-effort: if the lookup fails the pin is still saved,
+  // just without the boost. Usually resolves from cache instantly.
+  const country = await fetchCountry();
+
   await db.transact(
     db.tx.pins[pinId]
       .update({
@@ -59,6 +65,7 @@ export async function createPin(
         description: input.description.trim(),
         latitude: input.latitude,
         longitude: input.longitude,
+        ...(country ? { country } : {}),
         createdAt: Date.now(),
       })
       .link({ owner: userId, photos: fileIds }),
