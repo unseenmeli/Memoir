@@ -12,8 +12,17 @@ import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
+import { MapFocusProvider } from "@/lib/mapFocus";
+import { TabBarProvider } from "@/lib/tabBar";
+import { ThemeProvider, useTheme } from "@/lib/theme";
 
 SplashScreen.preventAutoHideAsync();
+
+// Status bar text follows the active theme (light text on dark backgrounds).
+function ThemedStatusBar() {
+  const { scheme } = useTheme();
+  return <StatusBar style={scheme === "dark" ? "light" : "dark"} />;
+}
 
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
@@ -36,12 +45,17 @@ export default function RootLayout() {
   }
 
   return (
-    <>
-      <StatusBar style="dark" />
-      <Stack screenOptions={{ headerShown: false }}>
-        <Stack.Screen name="login" />
-        <Stack.Screen name="(tabs)" />
-      </Stack>
-    </>
+    <ThemeProvider>
+      <TabBarProvider>
+        <MapFocusProvider>
+          <ThemedStatusBar />
+          <Stack screenOptions={{ headerShown: false }}>
+            <Stack.Screen name="login" />
+            <Stack.Screen name="(tabs)" />
+            <Stack.Screen name="settings" options={{ presentation: "modal" }} />
+          </Stack>
+        </MapFocusProvider>
+      </TabBarProvider>
+    </ThemeProvider>
   );
 }

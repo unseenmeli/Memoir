@@ -1,0 +1,82 @@
+import { id } from "@instantdb/react-native";
+import type { ImagePickerAsset } from "expo-image-picker";
+import { db } from "./db";
+
+/** Per-user cap on how many pins someone can create. */
+export const MAX_PINS_PER_USER = 400;
+
+export type NewPinInput = {
+  name: string;
+  description: string;
+  latitude: number;
+  longitude: number;
+  photos: ImagePickerAsset[];
+};
+
+/**
+ * Uploads one picked image to Instant Storage and returns its $files id.
+ * The file is stored under the pin's folder so a pin's photos stay grouped.
+ */
+async function uploadPhoto(
+  pinId: string,
+  asset: ImagePickerAsset,
+  index: number,
+): Promise<string> {
+  // RN can turn a local file:// URI into a Blob via fetch.
+  const response = await fetch(asset.uri);
+  const blob = await response.blob();
+
+  const contentType = asset.mimeType ?? blob.type ?? "image/jpeg";
+  const extension = contentType.split("/")[1] ?? "jpg";
+  const name = asset.fileName ?? `photo-${index}.${extension}`;
+  const path = `pins/${pinId}/${index}-${name}`;
+
+  const { data } = await db.storage.uploadFile(path, blob, { contentType });
+  return data.id;
+}
+
+/**
+ * Creates a pin: uploads its photos, then writes the pin and links it to its
+ * owner and photos in a single transaction. Returns the new pin's id.
+ */
+export async function createPin(
+  userId: string,
+  input: NewPinInput,
+): Promise<string> {
+  const pinId = id();
+
+  // Upload sequentially so a slow connection doesn't fire many large PUTs at
+  // once; a pin rarely has more than a handful of photos.
+  const fileIds: string[] = [];
+  for (let i = 0; i < input.photos.length; i++) {
+    fileIds.push(await uploadPhoto(pinId, input.photos[i], i));
+  }
+
+  await db.transact(
+    db.tx.pins[pinId]
+      .update({
+        name: input.name.trim(),
+        description: input.description.trim(),
+        latitude: input.latitude,
+        longitude: input.longitude,
+        createdAt: Date.now(),
+      })
+      .link({ owner: userId, photos: fileIds }),
+  );
+
+  return pinId;
+}
+
+/**
+ * Deletes a pin and its photo files. Deleting the $files rows also removes the
+ * stored blobs from Instant Storage.
+ */
+export async function deletePin(
+  pinId: string,
+  fileIds: string[],
+): Promise<void> {
+  await db.transact([
+    ...fileIds.map((fileId) => db.tx.$files[fileId].delete()),
+    db.tx.pins[pinId].delete(),
+  ]);
+}
