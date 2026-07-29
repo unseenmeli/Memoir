@@ -1,7 +1,6 @@
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
-  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -11,11 +10,17 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { db } from "@/lib/db";
+import { useBootBlocker } from "@/lib/loading";
 
 export default function LoginScreen() {
   const router = useRouter();
   const { isLoading, user } = db.useAuth();
   const [sentEmail, setSentEmail] = useState("");
+
+  // Keep the boot splash up while auth resolves; if we're signed in we're
+  // about to bounce to "/", so let the splash ride through that too rather
+  // than flashing a spinner between the two screens.
+  useBootBlocker("login", isLoading || !!user);
 
   useEffect(() => {
     if (!isLoading && user) {
@@ -24,11 +29,7 @@ export default function LoginScreen() {
   }, [isLoading, user, router]);
 
   if (isLoading || user) {
-    return (
-      <View className="flex-1 items-center justify-center bg-white dark:bg-zinc-950">
-        <ActivityIndicator />
-      </View>
-    );
+    return <View className="flex-1 bg-white dark:bg-zinc-950" />;
   }
 
   return (

@@ -12,6 +12,9 @@ import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
+import { LoadingScreen } from "@/components/LoadingScreen";
+import { CurtainProvider } from "@/lib/curtain";
+import { LoadingProvider, useBootBlocker } from "@/lib/loading";
 import { MapFocusProvider } from "@/lib/mapFocus";
 import { TabBarProvider } from "@/lib/tabBar";
 import { ThemeProvider, useTheme } from "@/lib/theme";
@@ -24,6 +27,15 @@ function ThemedStatusBar() {
   return <StatusBar style={scheme === "dark" ? "light" : "dark"} />;
 }
 
+/**
+ * Holds the boot splash open until the fonts have settled. Lives inside
+ * LoadingProvider so it can register itself as a blocker.
+ */
+function FontGate({ ready }: { ready: boolean }) {
+  useBootBlocker("fonts", !ready);
+  return null;
+}
+
 export default function RootLayout() {
   const [fontsLoaded, fontError] = useFonts({
     Outfit_400Regular,
@@ -31,31 +43,42 @@ export default function RootLayout() {
     Outfit_600SemiBold,
     Outfit_700Bold,
   });
+  // On error too, so a font failure never wedges the app behind the splash.
+  const fontsReady = fontsLoaded || !!fontError;
 
   useEffect(() => {
-    // Hide the splash once fonts settle — on error too, so a font failure
-    // never leaves the app stuck behind the splash screen.
-    if (fontsLoaded || fontError) {
+    // Hand off from the native splash to our animated one as soon as the
+    // fonts settle — our LoadingScreen covers the app until it's truly ready.
+    if (fontsReady) {
       SplashScreen.hideAsync();
     }
-  }, [fontsLoaded, fontError]);
+  }, [fontsReady]);
 
-  if (!fontsLoaded && !fontError) {
-    return null;
-  }
-
+  // The tree stays mounted while fonts load so the animated splash can run;
+  // text is held back until the real fonts are in to avoid a visible swap.
   return (
     <ThemeProvider>
-      <TabBarProvider>
-        <MapFocusProvider>
-          <ThemedStatusBar />
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="login" />
-            <Stack.Screen name="(tabs)" />
-            <Stack.Screen name="settings" options={{ presentation: "modal" }} />
-          </Stack>
-        </MapFocusProvider>
-      </TabBarProvider>
+      <LoadingProvider>
+        <TabBarProvider>
+          <MapFocusProvider>
+            <CurtainProvider>
+              <ThemedStatusBar />
+              <FontGate ready={fontsReady} />
+              {fontsReady ? (
+                <Stack screenOptions={{ headerShown: false }}>
+                  <Stack.Screen name="login" />
+                  <Stack.Screen name="(tabs)" />
+                  <Stack.Screen
+                    name="settings"
+                    options={{ presentation: "modal" }}
+                  />
+                </Stack>
+              ) : null}
+              <LoadingScreen />
+            </CurtainProvider>
+          </MapFocusProvider>
+        </TabBarProvider>
+      </LoadingProvider>
     </ThemeProvider>
   );
 }
