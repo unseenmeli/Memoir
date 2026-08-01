@@ -12,8 +12,8 @@ import { Stack } from "expo-router";
 import * as SplashScreen from "expo-splash-screen";
 import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
+import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { LoadingScreen } from "@/components/LoadingScreen";
-import { CurtainProvider } from "@/lib/curtain";
 import { LoadingProvider, useBootBlocker } from "@/lib/loading";
 import { MapFocusProvider } from "@/lib/mapFocus";
 import { TabBarProvider } from "@/lib/tabBar";
@@ -57,11 +57,11 @@ export default function RootLayout() {
   // The tree stays mounted while fonts load so the animated splash can run;
   // text is held back until the real fonts are in to avoid a visible swap.
   return (
-    <ThemeProvider>
-      <LoadingProvider>
-        <TabBarProvider>
-          <MapFocusProvider>
-            <CurtainProvider>
+    <GestureHandlerRootView style={{ flex: 1 }}>
+      <ThemeProvider>
+        <LoadingProvider>
+          <TabBarProvider>
+            <MapFocusProvider>
               <ThemedStatusBar />
               <FontGate ready={fontsReady} />
               {fontsReady ? (
@@ -75,10 +75,10 @@ export default function RootLayout() {
                 </Stack>
               ) : null}
               <LoadingScreen />
-            </CurtainProvider>
-          </MapFocusProvider>
-        </TabBarProvider>
-      </LoadingProvider>
-    </ThemeProvider>
+            </MapFocusProvider>
+          </TabBarProvider>
+        </LoadingProvider>
+      </ThemeProvider>
+    </GestureHandlerRootView>
   );
 }

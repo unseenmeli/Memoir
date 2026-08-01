@@ -13,7 +13,10 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AuthGate } from "@/components/AuthGate";
+import { GlassView } from "@/components/GlassView";
+import { ScreenBackground } from "@/components/ScreenBackground";
 import { db } from "@/lib/db";
+import { getPalette, withAlpha } from "@/lib/palette";
 import { updateDisplayName, type ProfileRecord } from "@/lib/profile";
 import { useTheme, type ThemePreference } from "@/lib/theme";
 
@@ -25,37 +28,44 @@ const THEME_OPTIONS: { value: ThemePreference; label: string; icon: keyof typeof
 
 function AppearanceControl() {
   const { preference, setPreference, scheme } = useTheme();
-  // The active chip's fill inverts with the theme, so its icon must contrast
-  // with that fill: dark icon in dark mode, light icon in light mode.
-  const activeIconColor = scheme === "dark" ? "#18181b" : "#ffffff";
+  const palette = getPalette(scheme);
+
   return (
     <View className="flex-row gap-2">
       {THEME_OPTIONS.map((opt) => {
         const active = preference === opt.value;
+        const content = (
+          <View className="items-center gap-1.5 px-3 py-4">
+            <Feather
+              name={opt.icon}
+              size={19}
+              color={active ? palette.accentFg : palette.textDim}
+            />
+            <Text
+              style={{
+                fontSize: 12.5,
+                fontWeight: "700",
+                color: active ? palette.accentFg : palette.text,
+              }}
+            >
+              {opt.label}
+            </Text>
+          </View>
+        );
         return (
           <Pressable
             key={opt.value}
             onPress={() => setPreference(opt.value)}
-            className={`flex-1 items-center gap-1.5 rounded-2xl border px-3 py-4 active:opacity-70 ${
-              active
-                ? "border-zinc-900 bg-zinc-900 dark:border-zinc-100 dark:bg-zinc-100"
-                : "border-zinc-300 bg-white dark:border-zinc-700 dark:bg-zinc-900"
-            }`}
+            className="flex-1 active:opacity-70"
+            style={{ borderRadius: 14, overflow: "hidden" }}
           >
-            <Feather
-              name={opt.icon}
-              size={20}
-              color={active ? activeIconColor : "#a1a1aa"}
-            />
-            <Text
-              className={`text-sm font-outfit-medium ${
-                active
-                  ? "text-white dark:text-zinc-900"
-                  : "text-zinc-600 dark:text-zinc-400"
-              }`}
-            >
-              {opt.label}
-            </Text>
+            {active ? (
+              <View style={{ backgroundColor: palette.accent }}>{content}</View>
+            ) : (
+              <GlassView radius={14} intensity={25}>
+                {content}
+              </GlassView>
+            )}
           </Pressable>
         );
       })}
@@ -64,6 +74,8 @@ function AppearanceControl() {
 }
 
 function DisplayNameEditor({ user }: { user: User }) {
+  const { scheme } = useTheme();
+  const palette = getPalette(scheme);
   const { data } = db.useQuery({
     profiles: { $: { where: { "user.id": user.id } } },
   });
@@ -106,23 +118,28 @@ function DisplayNameEditor({ user }: { user: User }) {
   }
 
   return (
-    <View className="gap-2">
-      <TextInput
-        value={name}
-        onChangeText={(t) => {
-          setTouched(true);
-          setName(t);
-          setStatus(null);
-        }}
-        placeholder="Your display name"
-        placeholderTextColor="#a1a1aa"
-        autoCapitalize="none"
-        autoCorrect={false}
-        editable={!saving && !!profile}
-        returnKeyType="done"
-        onSubmitEditing={save}
-        className="rounded-xl border border-zinc-300 px-4 py-3.5 text-base text-zinc-900 font-outfit dark:border-zinc-700 dark:text-zinc-100"
-      />
+    <View className="gap-3">
+      <View style={{ borderRadius: 14, overflow: "hidden" }}>
+        <GlassView radius={14} intensity={25}>
+          <TextInput
+            value={name}
+            onChangeText={(t) => {
+              setTouched(true);
+              setName(t);
+              setStatus(null);
+            }}
+            placeholder="Your display name"
+            placeholderTextColor={palette.textDim}
+            autoCapitalize="none"
+            autoCorrect={false}
+            editable={!saving && !!profile}
+            returnKeyType="done"
+            onSubmitEditing={save}
+            className="px-4 py-3.5 text-base font-outfit"
+            style={{ color: palette.text }}
+          />
+        </GlassView>
+      </View>
       <View className="flex-row items-center justify-between">
         <Text
           className={`text-sm font-outfit ${
@@ -136,12 +153,16 @@ function DisplayNameEditor({ user }: { user: User }) {
         <Pressable
           onPress={save}
           disabled={saving || !profile}
-          className="rounded-lg bg-zinc-900 px-4 py-2 active:opacity-80 disabled:opacity-40 dark:bg-zinc-100"
+          className="rounded-lg px-4 py-2 active:opacity-80 disabled:opacity-40"
+          style={{ backgroundColor: palette.accent }}
         >
           {saving ? (
-            <ActivityIndicator size="small" color="#ffffff" />
+            <ActivityIndicator size="small" color={palette.accentFg} />
           ) : (
-            <Text className="text-sm font-outfit-medium text-white dark:text-zinc-900">
+            <Text
+              className="text-sm font-outfit-medium"
+              style={{ color: palette.accentFg }}
+            >
               Save
             </Text>
           )}
@@ -153,6 +174,8 @@ function DisplayNameEditor({ user }: { user: User }) {
 
 function SettingsContent({ user }: { user: User }) {
   const router = useRouter();
+  const { scheme } = useTheme();
+  const palette = getPalette(scheme);
 
   function confirmSignOut() {
     Alert.alert("Sign out", "Are you sure you want to sign out?", [
@@ -166,60 +189,123 @@ function SettingsContent({ user }: { user: User }) {
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-white dark:bg-zinc-950" edges={["top", "bottom"]}>
-      <View className="flex-row items-center justify-between px-5 py-3">
-        <Text className="text-lg font-outfit-semibold text-zinc-900 dark:text-zinc-50">
-          Settings
-        </Text>
-        <Pressable onPress={() => router.back()} hitSlop={8} className="active:opacity-60">
-          <Text className="text-base font-outfit-medium text-zinc-500 dark:text-zinc-400">
-            Done
-          </Text>
-        </Pressable>
-      </View>
-
-      <ScrollView className="flex-1 px-5" contentContainerClassName="gap-8 pt-3 pb-10">
-        <View className="gap-3">
-          <Text className="text-sm font-outfit-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-            Appearance
-          </Text>
-          <AppearanceControl />
+    <ScreenBackground>
+      <SafeAreaView className="flex-1" edges={["top", "bottom"]}>
+        {/* Grabber handle — this route is presented as a modal sheet. */}
+        <View className="items-center pt-2">
+          <View
+            style={{
+              width: 36,
+              height: 4.5,
+              borderRadius: 3,
+              backgroundColor: palette.border,
+            }}
+          />
         </View>
 
-        <View className="gap-3">
-          <Text className="text-sm font-outfit-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-            Display name
+        <View className="flex-row items-center justify-between px-5 py-3">
+          <Text
+            style={{
+              fontFamily: "Outfit_700Bold",
+              fontSize: 24,
+              letterSpacing: -0.4,
+              color: palette.text,
+            }}
+          >
+            Settings
           </Text>
-          <DisplayNameEditor user={user} />
+          <Pressable onPress={() => router.back()} hitSlop={8} className="active:opacity-60">
+            <Text
+              className="text-base font-outfit-semibold"
+              style={{ color: palette.accent }}
+            >
+              Done
+            </Text>
+          </Pressable>
         </View>
 
-        <View className="gap-3">
-          <Text className="text-sm font-outfit-medium uppercase tracking-wide text-zinc-400 dark:text-zinc-500">
-            Account
-          </Text>
-          <View className="rounded-xl border border-zinc-200 px-4 py-3.5 dark:border-zinc-800">
-            <Text className="text-xs text-zinc-400 font-outfit dark:text-zinc-500">
-              Signed in as
+        <ScrollView className="flex-1 px-5" contentContainerClassName="gap-8 pt-3 pb-10">
+          <View className="gap-3">
+            <Text
+              style={{
+                fontSize: 11,
+                letterSpacing: 1.2,
+                fontWeight: "700",
+                textTransform: "uppercase",
+                color: palette.textDim,
+              }}
+            >
+              Appearance
             </Text>
-            <Text className="mt-0.5 text-base text-zinc-900 font-outfit dark:text-zinc-100">
-              {user.email}
-            </Text>
+            <AppearanceControl />
           </View>
-        </View>
-      </ScrollView>
 
-      {/* Sign out pinned to the bottom of the screen. */}
-      <View className="border-t border-zinc-200 px-5 pb-2 pt-3 dark:border-zinc-800">
-        <Pressable
-          onPress={confirmSignOut}
-          className="items-center rounded-xl border border-red-300 px-4 py-3.5 active:opacity-70 dark:border-red-900"
-        >
-          <Text className="text-base font-outfit-medium text-red-600 dark:text-red-400">
-            Sign out
-          </Text>
-        </Pressable>
-      </View>
-    </SafeAreaView>
+          <View className="gap-3">
+            <Text
+              style={{
+                fontSize: 11,
+                letterSpacing: 1.2,
+                fontWeight: "700",
+                textTransform: "uppercase",
+                color: palette.textDim,
+              }}
+            >
+              Display name
+            </Text>
+            <DisplayNameEditor user={user} />
+          </View>
+
+          <View className="gap-3">
+            <Text
+              style={{
+                fontSize: 11,
+                letterSpacing: 1.2,
+                fontWeight: "700",
+                textTransform: "uppercase",
+                color: palette.textDim,
+              }}
+            >
+              Account
+            </Text>
+            <View style={{ borderRadius: 14, overflow: "hidden" }}>
+              <GlassView radius={14} intensity={25}>
+                <View className="px-4 py-3.5">
+                  <Text className="text-xs" style={{ color: palette.textDim }}>
+                    Signed in as
+                  </Text>
+                  <Text
+                    className="mt-0.5 text-base font-outfit"
+                    style={{ color: palette.text }}
+                  >
+                    {user.email}
+                  </Text>
+                </View>
+              </GlassView>
+            </View>
+          </View>
+        </ScrollView>
+
+        {/* Sign out pinned to the bottom of the screen. */}
+        <View className="px-5 pb-2 pt-3">
+          <Pressable
+            onPress={confirmSignOut}
+            className="items-center rounded-2xl px-4 py-3.5 active:opacity-70"
+            style={{
+              borderWidth: 1,
+              borderColor: withAlpha(palette.accent, 0.55),
+              backgroundColor: withAlpha(palette.accent, 0.1),
+            }}
+          >
+            <Text
+              className="text-base font-outfit-semibold"
+              style={{ color: palette.accent }}
+            >
+              Sign out
+            </Text>
+          </Pressable>
+        </View>
+      </SafeAreaView>
+    </ScreenBackground>
   );
 }
 

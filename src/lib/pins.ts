@@ -74,6 +74,48 @@ export async function createPin(
   return pinId;
 }
 
+export type EditPinInput = {
+  name: string;
+  description: string;
+  /** Newly picked photos to upload and attach. */
+  newPhotos: ImagePickerAsset[];
+  /** File ids of existing photos the user removed while editing. */
+  removedPhotoIds: string[];
+  /**
+   * The path index new uploads should start from (see `nextPhotoIndex` in
+   * PinDetails.tsx) — one past the highest index already on this pin, so a
+   * new photo can never collide with (and outrank) an existing one.
+   */
+  startPhotoIndex: number;
+};
+
+/**
+ * Updates a pin's name, description, and photo set. Location isn't editable —
+ * a pin's coordinate is fixed at creation. Removed photos are deleted outright
+ * (their $files rows), new ones are uploaded and linked, in one transaction.
+ */
+export async function updatePin(
+  pinId: string,
+  input: EditPinInput,
+): Promise<void> {
+  const fileIds: string[] = [];
+  for (let i = 0; i < input.newPhotos.length; i++) {
+    fileIds.push(
+      await uploadPhoto(pinId, input.newPhotos[i], input.startPhotoIndex + i),
+    );
+  }
+
+  await db.transact([
+    ...input.removedPhotoIds.map((fileId) => db.tx.$files[fileId].delete()),
+    db.tx.pins[pinId]
+      .update({
+        name: input.name.trim(),
+        description: input.description.trim(),
+      })
+      .link({ photos: fileIds }),
+  ]);
+}
+
 /**
  * Deletes a pin and its photo files. Deleting the $files rows also removes the
  * stored blobs from Instant Storage.

@@ -1,28 +1,16 @@
 import { Ionicons } from "@expo/vector-icons";
 import type { BottomTabBarButtonProps } from "@react-navigation/bottom-tabs";
 import { useEffect } from "react";
-import { type GestureResponderEvent, Pressable, View } from "react-native";
-import {
-  HOLD,
-  IN_DURATION,
-  NAV_AT,
-  OUT_DURATION,
-  useCurtain,
-} from "@/lib/curtain";
+import { Pressable, View } from "react-native";
 import Animated, {
   Easing,
   interpolateColor,
   useAnimatedStyle,
   useSharedValue,
-  withDelay,
   withTiming,
 } from "react-native-reanimated";
 
-// The icon/label ease is synced to the curtain's fade-out: it starts when the
-// white begins lifting and finishes exactly as it clears. `focused` flips at
-// NAV_AT; fade-out starts at IN_DURATION + HOLD — so wait out the difference,
-// then ease over OUT_DURATION.
-const SYNC_DELAY = Math.max(0, IN_DURATION + HOLD - NAV_AT);
+const DURATION = 200;
 const EASING = Easing.inOut(Easing.ease);
 
 export type TabIconName = "home" | "search" | "person";
@@ -31,7 +19,8 @@ export type TabIconName = "home" | "search" | "person";
  * Fully custom tab button. React Navigation's default button hard-swaps icon
  * opacity with no animation, so we replace it entirely: one instance per tab
  * (no double-render), reading focus from aria-selected, and easing icon
- * color/fill + label color in sync with the curtain's fade-out.
+ * color/fill + label color as soon as focus changes — navigation itself is
+ * instant, no page-transition wipe.
  */
 export function makeTabBarButton(config: {
   name: TabIconName;
@@ -41,7 +30,6 @@ export function makeTabBarButton(config: {
 }) {
   return function TabBarButton(props: BottomTabBarButtonProps) {
     const { name, label, activeColor, inactiveColor } = config;
-    const { runTransition } = useCurtain();
     // bottom-tabs 7.x passes focus as the `aria-selected` prop (not via
     // accessibilityState), so read that.
     const focused = Boolean(
@@ -51,11 +39,10 @@ export function makeTabBarButton(config: {
     const progress = useSharedValue(focused ? 1 : 0);
 
     useEffect(() => {
-      // Delay so the icon eases as the curtain lifts, not while it's rising.
-      progress.value = withDelay(
-        SYNC_DELAY,
-        withTiming(focused ? 1 : 0, { duration: OUT_DURATION, easing: EASING }),
-      );
+      progress.value = withTiming(focused ? 1 : 0, {
+        duration: DURATION,
+        easing: EASING,
+      });
     }, [focused, progress]);
 
     // Cross-fade the outline (inactive) and filled (active) glyphs.
@@ -73,17 +60,9 @@ export function makeTabBarButton(config: {
       ),
     }));
 
-    function handlePress(e: GestureResponderEvent) {
-      // Already on this tab — no curtain, no navigation.
-      if (focused) return;
-      // Play the white/theme curtain, running the real navigation while the
-      // screen is fully covered.
-      runTransition(() => props.onPress?.(e));
-    }
-
     return (
       <Pressable
-        onPress={handlePress}
+        onPress={props.onPress}
         onLongPress={props.onLongPress}
         accessibilityRole="button"
         accessibilityState={{ selected: focused }}
