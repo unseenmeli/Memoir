@@ -1,6 +1,7 @@
 import { Feather } from "@expo/vector-icons";
 import type { User } from "@instantdb/react-native";
 import * as ImagePicker from "expo-image-picker";
+import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useEffect, useRef, useState } from "react";
 import {
@@ -14,12 +15,17 @@ import {
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AuthGate } from "@/components/AuthGate";
-import { PinDetails, type PinRecord } from "@/components/PinDetails";
+import { GlassView } from "@/components/GlassView";
+import { PinComposer } from "@/components/PinComposer";
+import { PinDetails, sortPhotos, type PinRecord } from "@/components/PinDetails";
+import { ScreenBackground } from "@/components/ScreenBackground";
 import { db } from "@/lib/db";
 import { useBootBlocker } from "@/lib/loading";
 import { useMapFocus } from "@/lib/mapFocus";
+import { getPalette, mix, monoFont } from "@/lib/palette";
 import { ensureProfile, updateAvatar, type ProfileRecord } from "@/lib/profile";
 import { useTabBarHeight } from "@/lib/tabBar";
+import { useTheme } from "@/lib/theme";
 
 // Playful backgrounds + emoji for pins that have no photo, so the collage
 // never turns into a wall of grey boxes.
@@ -36,16 +42,26 @@ const CARD_COLORS = [
 const CARD_EMOJI = ["📍", "🌆", "🍜", "🏞️", "☕️", "🌊", "🎡", "🌮"];
 const TILE_HEIGHT = 172;
 
-function Stat({ label, value }: { label: string; value: string }) {
+function Stat({
+  label,
+  value,
+  fg,
+  fgDim,
+}: {
+  label: string;
+  value: string;
+  fg: string;
+  fgDim: string;
+}) {
   return (
     <View className="flex-row items-baseline gap-2">
       <Text
-        className="text-right text-lg font-outfit-semibold text-zinc-900 dark:text-zinc-50"
-        style={{ width: 28 }}
+        className="text-right text-lg font-outfit-semibold"
+        style={{ width: 28, color: fg }}
       >
         {value}
       </Text>
-      <Text className="text-lg text-zinc-900 font-outfit dark:text-zinc-300">
+      <Text className="text-base font-outfit-medium" style={{ color: fgDim }}>
         {label}
       </Text>
     </View>
@@ -63,7 +79,7 @@ function PinTile({
   onPress: () => void;
 }) {
   const rotate = index % 2 === 0 ? "-1.5deg" : "1.5deg";
-  const photo = pin.photos[0];
+  const photo = sortPhotos(pin.photos)[0];
 
   return (
     <Pressable
@@ -130,8 +146,11 @@ function ProfileContent({ user }: { user: User }) {
   const router = useRouter();
   const { focusPin } = useMapFocus();
   const barHeight = useTabBarHeight();
+  const { scheme } = useTheme();
+  const palette = getPalette(scheme);
   const [uploading, setUploading] = useState(false);
   const [selected, setSelected] = useState<PinRecord | null>(null);
+  const [editing, setEditing] = useState<PinRecord | null>(null);
   const creatingRef = useRef(false);
 
   const { data, isLoading } = db.useQuery({
@@ -206,81 +225,196 @@ function ProfileContent({ user }: { user: User }) {
   const displayName = profile?.displayName ?? email.split("@")[0] ?? "explorer";
   const initial = displayName.charAt(0).toUpperCase();
 
+  const heroGradient: [string, string, string] = [
+    palette.accent,
+    mix(palette.accent, palette.accent2, 0.55),
+    palette.accent2,
+  ];
+
   const header = (
     <View className="px-6 pt-4">
-      {/* Header row */}
-      <View className="flex-row items-center justify-between">
-        <Text
-          numberOfLines={1}
-          className="flex-1 text-3xl font-outfit-semibold tracking-tight text-zinc-900 dark:text-zinc-50"
-        >
-          {displayName}
-        </Text>
-        <Pressable
-          onPress={() => router.push("/settings")}
-          accessibilityRole="button"
-          accessibilityLabel="Settings"
-          hitSlop={8}
-          className="ml-2 active:opacity-60"
-        >
-          <Feather name="settings" size={24} color="#a1a1aa" />
-        </Pressable>
-      </View>
+      {/* Gradient hero card */}
+      <View
+        style={{
+          borderRadius: 22,
+          overflow: "hidden",
+          marginBottom: 22,
+          shadowColor: "#000",
+          shadowOpacity: 0.25,
+          shadowRadius: 20,
+          shadowOffset: { width: 0, height: 10 },
+          elevation: 10,
+        }}
+      >
+        <LinearGradient
+          colors={heroGradient}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+          }}
+        />
+        <LinearGradient
+          colors={["rgba(255,255,255,0.4)", "transparent"]}
+          start={{ x: 1, y: 0 }}
+          end={{ x: 0.3, y: 0.55 }}
+          style={{
+            position: "absolute",
+            top: 0,
+            left: 0,
+            right: 0,
+            bottom: 0,
+          }}
+        />
 
-      {/* Avatar + stats */}
-      <View className="mt-5 flex-row items-center justify-between">
-        <Pressable
-          onPress={changeAvatar}
-          accessibilityRole="button"
-          accessibilityLabel="Change profile photo"
-          className="active:opacity-80"
-        >
-          <View className="h-44 w-44 overflow-hidden rounded-full bg-zinc-100 dark:bg-zinc-800">
-            {profile?.avatar?.url ? (
-              <Image
-                source={{ uri: profile.avatar.url }}
-                style={{ width: "100%", height: "100%" }}
-                resizeMode="cover"
+        <View style={{ padding: 18 }}>
+          {/* Name + settings */}
+          <View className="mb-5 flex-row items-center justify-between">
+            <Text
+              numberOfLines={1}
+              style={{
+                flex: 1,
+                fontFamily: "Outfit_700Bold",
+                fontSize: 28,
+                letterSpacing: -0.5,
+                color: palette.heroFg,
+              }}
+            >
+              {displayName}
+            </Text>
+            <Pressable
+              onPress={() => router.push("/settings")}
+              accessibilityRole="button"
+              accessibilityLabel="Settings"
+              hitSlop={8}
+              className="ml-2 active:opacity-70"
+            >
+              <GlassView radius={19} intensity={25} style={{ width: 38, height: 38 }}>
+                <View className="flex-1 items-center justify-center">
+                  <Feather name="settings" size={17} color={palette.heroFg} />
+                </View>
+              </GlassView>
+            </Pressable>
+          </View>
+
+          {/* Avatar + stats */}
+          <View className="flex-row items-center gap-5">
+            <Pressable
+              onPress={changeAvatar}
+              accessibilityRole="button"
+              accessibilityLabel="Change profile photo"
+              className="active:opacity-80"
+              style={{ width: 90, height: 90 }}
+            >
+              <View
+                style={{
+                  width: 90,
+                  height: 90,
+                  borderRadius: 45,
+                  overflow: "hidden",
+                  borderWidth: 2.5,
+                  borderColor: palette.heroFg,
+                }}
+                className="bg-black/10"
+              >
+                {profile?.avatar?.url ? (
+                  <Image
+                    source={{ uri: profile.avatar.url }}
+                    style={{ width: "100%", height: "100%" }}
+                    resizeMode="cover"
+                  />
+                ) : (
+                  <View className="flex-1 items-center justify-center">
+                    <Text
+                      className="text-3xl font-outfit-bold"
+                      style={{ color: palette.heroFg }}
+                    >
+                      {initial}
+                    </Text>
+                  </View>
+                )}
+                {uploading ? (
+                  <View className="absolute inset-0 items-center justify-center bg-black/40">
+                    <ActivityIndicator color="#ffffff" />
+                  </View>
+                ) : null}
+              </View>
+              <View
+                style={{
+                  position: "absolute",
+                  bottom: -2,
+                  right: -2,
+                  width: 30,
+                  height: 30,
+                  borderRadius: 15,
+                  alignItems: "center",
+                  justifyContent: "center",
+                  backgroundColor: "#ffffff",
+                  borderWidth: 2.5,
+                  borderColor: palette.accent,
+                }}
+              >
+                <Feather name="camera" size={13} color={palette.accent} />
+              </View>
+            </Pressable>
+
+            <View className="flex-1 gap-2.5">
+              <Stat
+                label="Connections"
+                value="0"
+                fg={palette.heroFg}
+                fgDim={palette.heroFgDim}
               />
-            ) : (
-              <View className="flex-1 items-center justify-center">
-                <Text className="text-5xl font-outfit-bold text-zinc-400 dark:text-zinc-500">
-                  {initial}
-                </Text>
-              </View>
-            )}
-            {uploading ? (
-              <View className="absolute inset-0 items-center justify-center bg-black/40">
-                <ActivityIndicator color="#ffffff" />
-              </View>
-            ) : null}
+              <Stat
+                label="Pins"
+                value={String(pinCount)}
+                fg={palette.heroFg}
+                fgDim={palette.heroFgDim}
+              />
+              <Stat
+                label="Streak"
+                value="0"
+                fg={palette.heroFg}
+                fgDim={palette.heroFgDim}
+              />
+            </View>
           </View>
-          <View className="absolute bottom-1 right-1 h-11 w-11 items-center justify-center rounded-full border-4 border-white bg-zinc-900 dark:border-zinc-950">
-            <Feather name="camera" size={17} color="#ffffff" />
-          </View>
-        </Pressable>
-
-        <View className="items-start gap-7">
-          <Stat label="Connections" value="0" />
-          <Stat label="Pins" value={String(pinCount)} />
-          <Stat label="Streak" value="0" />
         </View>
       </View>
 
       {/* Collage heading */}
-      <View className="mt-9 flex-row items-baseline justify-between">
-        <Text className="text-xl font-outfit-semibold text-zinc-900 dark:text-zinc-50">
+      <View className="flex-row items-baseline justify-between">
+        <Text
+          style={{
+            fontFamily: "Outfit_700Bold",
+            fontSize: 21,
+            letterSpacing: -0.3,
+            color: palette.text,
+          }}
+        >
           Your pins
         </Text>
-        <Text className="text-sm text-zinc-500 font-outfit dark:text-zinc-400">
-          {pinCount} saved
+        <Text
+          style={{
+            fontFamily: monoFont,
+            fontSize: 10.5,
+            letterSpacing: 1,
+            color: palette.textDim,
+          }}
+        >
+          {`[ ${String(pinCount).padStart(2, "0")} SAVED ]`}
         </Text>
       </View>
     </View>
   );
 
   return (
-    <SafeAreaView className="flex-1 bg-white dark:bg-zinc-950" edges={["top"]}>
+    <ScreenBackground>
+    <SafeAreaView className="flex-1" edges={["top"]}>
       <FlatList
         data={pins}
         keyExtractor={(item) => item.id}
@@ -306,8 +440,27 @@ function ProfileContent({ user }: { user: User }) {
         currentUserId={user.id}
         onClose={() => setSelected(null)}
         onShowOnMap={goToPinOnMap}
+        onEdit={(pin) => {
+          setSelected(null);
+          setEditing(pin);
+        }}
+      />
+
+      <PinComposer
+        visible={!!editing}
+        coordinate={
+          editing
+            ? { latitude: editing.latitude, longitude: editing.longitude }
+            : null
+        }
+        editingPin={editing}
+        userId={user.id}
+        pinCount={pinCount}
+        onClose={() => setEditing(null)}
+        onSaved={() => setEditing(null)}
       />
     </SafeAreaView>
+    </ScreenBackground>
   );
 }
 

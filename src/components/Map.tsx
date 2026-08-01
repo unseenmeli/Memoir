@@ -38,11 +38,12 @@ export function Map({
   const mapRef = useRef<MapView>(null);
   // Keyed by pin id so we can open a specific pin's callout on demand.
   const markerRefs = useRef<Record<string, InstanceType<typeof Marker> | null>>(
-    {},
+    {}
   );
 
   const [draft, setDraft] = useState<Coordinate | null>(null);
   const [selected, setSelected] = useState<PinRecord | null>(null);
+  const [editing, setEditing] = useState<PinRecord | null>(null);
   // `mapReady` = the native view laid out. `tilesLoaded` = it actually painted.
   // Only the second one means there's a map to look at.
   const [mapReady, setMapReady] = useState(false);
@@ -70,6 +71,8 @@ export function Map({
 
   // "Take me to the pin": once the map is ready, pan in tight and open the
   // pin's label. Gated on `mapReady` so it also works on the map's first mount.
+  // A focused search result (no `pinId` in the pins list) just gets the pan —
+  // there's no marker for it, so the callout lookup below is a harmless no-op.
   useEffect(() => {
     if (!target || !mapReady) return;
     const { latitude, longitude, pinId } = target;
@@ -78,7 +81,7 @@ export function Map({
     const panTimer = setTimeout(() => {
       mapRef.current?.animateToRegion(
         { latitude, longitude, latitudeDelta: 0.004, longitudeDelta: 0.004 },
-        650,
+        650
       );
     }, 250);
     const calloutTimer = setTimeout(() => {
@@ -150,18 +153,34 @@ export function Map({
       </MapView>
 
       <PinComposer
-        visible={!!draft}
-        coordinate={draft}
+        visible={!!draft || !!editing}
+        coordinate={
+          draft ??
+          (editing
+            ? { latitude: editing.latitude, longitude: editing.longitude }
+            : null)
+        }
+        editingPin={editing}
         userId={user.id}
         pinCount={myPinCount}
-        onClose={() => setDraft(null)}
-        onSaved={() => setDraft(null)}
+        onClose={() => {
+          setDraft(null);
+          setEditing(null);
+        }}
+        onSaved={() => {
+          setDraft(null);
+          setEditing(null);
+        }}
       />
 
       <PinDetails
         pin={selected}
         currentUserId={user.id}
         onClose={() => setSelected(null)}
+        onEdit={(pin) => {
+          setSelected(null);
+          setEditing(pin);
+        }}
       />
     </>
   );

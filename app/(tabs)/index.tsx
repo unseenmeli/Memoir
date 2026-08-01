@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import { useCallback, useState } from "react";
-import { Image, Pressable, StyleSheet, View } from "react-native";
+import { Pressable, StyleSheet, View } from "react-native";
 import Animated, {
   Easing,
   interpolate,
@@ -10,9 +10,11 @@ import Animated, {
 } from "react-native-reanimated";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AuthGate } from "@/components/AuthGate";
+import { GlassView } from "@/components/GlassView";
 import { Map } from "@/components/Map";
-import { Wordmark } from "@/components/Wordmark";
+import { TurbineLogo } from "@/components/TurbineLogo";
 import { useBootBlocker } from "@/lib/loading";
+import { getPalette } from "@/lib/palette";
 import { useTabBar } from "@/lib/tabBar";
 import { useTheme } from "@/lib/theme";
 
@@ -26,6 +28,7 @@ export default function HomeScreen() {
   const insets = useSafeAreaInsets();
   const { setHidden, hideProgress } = useTabBar();
   const { scheme } = useTheme();
+  const palette = getPalette(scheme);
   const [fullScreen, setFullScreen] = useState(false);
   const [mapReady, setMapReady] = useState(false);
 
@@ -63,12 +66,6 @@ export default function HomeScreen() {
     ],
   }));
 
-  // The separator band fades straight out without sliding — sliding it would
-  // briefly reveal the map edge above it mid-animation.
-  const separatorStyle = useAnimatedStyle(() => ({
-    opacity: interpolate(progress.value, [0, 1], [1, 0]),
-  }));
-
   // The toggle stays visible in full-screen (it's the only way back out), but
   // rides up into the space the header vacates so it isn't left stranded.
   const toggleStyle = useAnimatedStyle(() => ({
@@ -84,19 +81,6 @@ export default function HomeScreen() {
           {/* FIXED full-screen map — fills everything, never resizes. */}
           <Map user={user} onReady={handleMapReady} />
 
-          {/* Solid band separating the header from the map. The map is
-              full-bleed underneath, so this is what actually hides its top
-              edge; it fades away with the header when going full-screen. */}
-          <Animated.View
-            pointerEvents="none"
-            style={[
-              styles.separator,
-              { height: insets.top + HEADER_HEIGHT },
-              separatorStyle,
-            ]}
-            className="bg-white dark:bg-zinc-950"
-          />
-
           {/* Logo header floats OVER the map, below the status bar. Fades and
               slides up when going full-screen; the map underneath is untouched. */}
           <Animated.View
@@ -107,7 +91,31 @@ export default function HomeScreen() {
               headerStyle,
             ]}
           >
-            <Wordmark width={240} height={64} style={{ marginLeft: -24 }} />
+            <View className="flex-1 flex-row items-center justify-between px-5">
+              <TurbineLogo size={32} />
+
+              {/* Decorative only — this app has no notification system yet. */}
+              <GlassView
+                radius={20}
+                intensity={30}
+                style={{ width: 40, height: 40 }}
+              >
+                <View className="flex-1 items-center justify-center">
+                  <Feather name="bell" size={17} color={palette.text} />
+                  <View
+                    style={{
+                      position: "absolute",
+                      top: 8,
+                      right: 9,
+                      width: 6,
+                      height: 6,
+                      borderRadius: 3,
+                      backgroundColor: palette.accent,
+                    }}
+                  />
+                </View>
+              </GlassView>
+            </View>
           </Animated.View>
 
           {/* Full-screen toggle. */}
@@ -117,16 +125,24 @@ export default function HomeScreen() {
             accessibilityLabel={
               fullScreen ? "Exit full screen map" : "Full screen map"
             }
-            // Sits below the header band so it never overlaps the wordmark —
-            // it floats on the map itself, just under the separator's edge.
-            style={[{ top: insets.top + HEADER_HEIGHT + 24 }, toggleStyle]}
-            className="absolute left-5 h-11 w-11 items-center justify-center rounded-md bg-white shadow-sm active:opacity-70 dark:bg-zinc-900"
+            // Sits below the header band so it never overlaps the logo —
+            // it floats on the map itself.
+            style={[
+              { top: insets.top + HEADER_HEIGHT + 24 },
+              { position: "absolute", left: 20 },
+              toggleStyle,
+            ]}
+            className="active:opacity-70"
           >
-            <Feather
-              name={fullScreen ? "minimize-2" : "maximize-2"}
-              size={17}
-              color={scheme === "dark" ? "#fafafa" : "#18181b"}
-            />
+            <GlassView radius={13} intensity={35} style={{ width: 44, height: 44 }}>
+              <View className="flex-1 items-center justify-center">
+                <Feather
+                  name={fullScreen ? "minimize-2" : "maximize-2"}
+                  size={17}
+                  color={palette.text}
+                />
+              </View>
+            </GlassView>
           </AnimatedPressable>
         </View>
       )}
@@ -135,18 +151,6 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
-  separator: {
-    position: "absolute",
-    top: 0,
-    left: 0,
-    right: 0,
-    // Soft edge where the band meets the map.
-    shadowColor: "#000",
-    shadowOpacity: 0.08,
-    shadowRadius: 6,
-    shadowOffset: { width: 0, height: 2 },
-    elevation: 4,
-  },
   header: {
     position: "absolute",
     left: 0,

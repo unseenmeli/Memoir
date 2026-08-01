@@ -129,7 +129,7 @@ const styles = StyleSheet.create({
   layer: {
     alignItems: "center",
     justifyContent: "center",
-    // Above the curtain (9999) so a tab transition can't paint over the splash.
+    // Highest in the tree so nothing can paint over the splash.
     zIndex: 10000,
   },
   logo: {
