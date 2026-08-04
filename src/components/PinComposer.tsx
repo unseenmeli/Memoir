@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   Alert,
   Image,
@@ -17,8 +17,19 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { GlassView } from "@/components/GlassView";
 import { HeaderPill, nextPhotoIndex, type PinRecord } from "@/components/PinDetails";
 import { ScreenBackground } from "@/components/ScreenBackground";
+import { db } from "@/lib/db";
 import { createPin, MAX_PINS_PER_USER, updatePin } from "@/lib/pins";
 import { getPalette } from "@/lib/palette";
+import {
+  collectTags,
+  formatTag,
+  MAX_TAG_LENGTH,
+  MAX_TAGS_PER_PIN,
+  normalizeTag,
+  normalizeTags,
+  pinTags,
+  suggestTags,
+} from "@/lib/tags";
 import { useTheme } from "@/lib/theme";
 
 type Coordinate = { latitude: number; longitude: number };
@@ -53,11 +64,28 @@ export function PinComposer({
   const [newPhotos, setNewPhotos] = useState<ImagePicker.ImagePickerAsset[]>(
     [],
   );
+  const [tags, setTags] = useState<string[]>([]);
+  const [tagDraft, setTagDraft] = useState("");
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const isEditing = !!editingPin;
   const atLimit = !isEditing && pinCount >= MAX_PINS_PER_USER;
+
+  // The tag vocabulary already in use, for autocomplete. Queried here rather
+  // than passed down so the composer works wherever it's mounted.
+  const { data: tagData } = db.useQuery({ pins: {} });
+  const allTags = useMemo(
+    () => collectTags((tagData?.pins ?? []) as { tags?: unknown }[]),
+    [tagData],
+  );
+  const suggestions = useMemo(
+    () =>
+      tags.length >= MAX_TAGS_PER_PIN
+        ? []
+        : suggestTags(allTags, tagDraft, tags),
+    [allTags, tagDraft, tags],
+  );
 
   // Prefill from the pin being edited (or start blank) each time the sheet
   // opens — not on every render, so edits mid-session aren't clobbered.
@@ -65,6 +93,8 @@ export function PinComposer({
     if (!visible) return;
     setName(editingPin?.name ?? "");
     setDescription(editingPin?.description ?? "");
+    setTags(editingPin ? pinTags(editingPin) : []);
+    setTagDraft("");
     setExistingPhotos(editingPin?.photos ?? []);
     setRemovedPhotoIds([]);
     setNewPhotos([]);
@@ -109,6 +139,18 @@ export function PinComposer({
     setNewPhotos((prev) => prev.filter((p) => p.uri !== uri));
   }
 
+  /** Commits whatever is in the tag field, ignoring blanks and duplicates. */
+  function commitTag(raw?: string) {
+    const next = normalizeTag(raw ?? tagDraft);
+    setTagDraft("");
+    if (!next || tags.includes(next) || tags.length >= MAX_TAGS_PER_PIN) return;
+    setTags((prev) => [...prev, next]);
+  }
+
+  function removeTag(tag: string) {
+    setTags((prev) => prev.filter((t) => t !== tag));
+  }
+
   async function handleSave() {
     if (saving) return;
     if (!isEditing && !coordinate) return;
@@ -123,6 +165,10 @@ export function PinComposer({
       return;
     }
 
+    // Fold in a tag that was typed but never committed — otherwise hitting
+    // Save straight after typing silently drops it.
+    const finalTags = normalizeTags([...tags, tagDraft]);
+
     setSaving(true);
     setError("");
     try {
@@ -130,6 +176,7 @@ export function PinComposer({
         await updatePin(editingPin.id, {
           name: trimmedName,
           description,
+          tags: finalTags,
           newPhotos,
           removedPhotoIds,
           startPhotoIndex: nextPhotoIndex(editingPin.photos),
@@ -138,6 +185,7 @@ export function PinComposer({
         await createPin(userId, {
           name: trimmedName,
           description,
+          tags: finalTags,
           latitude: coordinate.latitude,
           longitude: coordinate.longitude,
           photos: newPhotos,
@@ -161,10 +209,11 @@ export function PinComposer({
     >
       <ScreenBackground>
         <SafeAreaView className="flex-1" edges={["top", "bottom"]}>
-          <KeyboardAvoidingView
-            className="flex-1"
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-          >
+          {/* Grabber + header live OUTSIDE the keyboard avoider on purpose.
+              Inside it, opening the keyboard pushed the whole header — Cancel
+              and Save included — up off the top of the sheet. Only the
+              scrolling content should move when the keyboard appears. */}
+          <View>
             {/* Grabber handle — matches the other sheets' chrome. */}
             <View className="items-center pt-2">
               <View
@@ -198,11 +247,17 @@ export function PinComposer({
                 onPress={handleSave}
               />
             </View>
+          </View>
 
+          <KeyboardAvoidingView
+            className="flex-1"
+            behavior={Platform.OS === "ios" ? "padding" : undefined}
+          >
             <ScrollView
               className="flex-1 px-5"
               contentContainerClassName="gap-5 pb-8 pt-2"
               keyboardShouldPersistTaps="handled"
+              keyboardDismissMode="interactive"
             >
               {atLimit ? (
                 <View className="rounded-xl bg-amber-50 px-4 py-3 dark:bg-amber-950/40">
@@ -338,6 +393,120 @@ export function PinComposer({
                     />
                   </GlassView>
                 </View>
+              </View>
+
+              {/* Tags */}
+              <View className="gap-2">
+                <View className="flex-row items-baseline justify-between">
+                  <Text
+                    className="text-sm font-outfit-medium"
+                    style={{ color: palette.textDim }}
+                  >
+                    Tags
+                  </Text>
+                  <Text
+                    className="text-xs font-outfit"
+                    style={{ color: palette.textDim }}
+                  >
+                    {tags.length}/{MAX_TAGS_PER_PIN}
+                  </Text>
+                </View>
+
+                {tags.length > 0 ? (
+                  <View className="flex-row flex-wrap gap-2">
+                    {tags.map((tag) => (
+                      <Pressable
+                        key={tag}
+                        onPress={() => removeTag(tag)}
+                        disabled={saving}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Remove tag ${formatTag(tag)}`}
+                        className="active:opacity-60"
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 6,
+                          borderRadius: 999,
+                          paddingHorizontal: 12,
+                          paddingVertical: 6,
+                          backgroundColor: palette.accent,
+                        }}
+                      >
+                        <Text
+                          style={{
+                            fontSize: 12.5,
+                            fontWeight: "700",
+                            color: palette.accentFg,
+                          }}
+                        >
+                          {formatTag(tag)}
+                        </Text>
+                        <Feather name="x" size={12} color={palette.accentFg} />
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
+
+                {tags.length < MAX_TAGS_PER_PIN ? (
+                  <View style={{ borderRadius: 16, overflow: "hidden" }}>
+                    <GlassView radius={16} intensity={25}>
+                      <TextInput
+                        value={tagDraft}
+                        onChangeText={setTagDraft}
+                        onSubmitEditing={() => commitTag()}
+                        // Commit on blur too, so tapping Save doesn't lose it.
+                        onBlur={() => commitTag()}
+                        placeholder="brunch, rooftop, cheap…"
+                        placeholderTextColor={palette.textDim}
+                        editable={!saving}
+                        autoCapitalize="none"
+                        autoCorrect={false}
+                        returnKeyType="done"
+                        maxLength={MAX_TAG_LENGTH}
+                        className="px-4 py-3.5 text-base font-outfit"
+                        style={{ color: palette.text }}
+                      />
+                    </GlassView>
+                  </View>
+                ) : null}
+
+                {/* Suggestions from tags already in use, so the vocabulary
+                    converges instead of fragmenting into near-duplicates. */}
+                {suggestions.length > 0 ? (
+                  <View className="flex-row flex-wrap gap-2">
+                    {suggestions.map((tag) => (
+                      <Pressable
+                        key={tag}
+                        onPress={() => commitTag(tag)}
+                        disabled={saving}
+                        accessibilityRole="button"
+                        accessibilityLabel={`Add tag ${formatTag(tag)}`}
+                        className="active:opacity-60"
+                        style={{
+                          flexDirection: "row",
+                          alignItems: "center",
+                          gap: 5,
+                          borderRadius: 999,
+                          paddingHorizontal: 11,
+                          paddingVertical: 5.5,
+                          borderWidth: 1,
+                          borderColor: palette.border,
+                        }}
+                      >
+                        <Feather name="plus" size={11} color={palette.textDim} />
+                        <Text
+                          style={{
+                            fontSize: 12,
+                            fontWeight: "600",
+                            color: palette.text,
+                          }}
+                        >
+                          {formatTag(tag)}
+                        </Text>
+                      </Pressable>
+                    ))}
+                  </View>
+                ) : null}
               </View>
 
               {error ? (

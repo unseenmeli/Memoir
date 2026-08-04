@@ -12,12 +12,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { runOnJS } from "react-native-worklets";
 import { GlassView } from "@/components/GlassView";
-import {
-  TAB_BAR_PILL_HEIGHT,
-  useTabBar,
-  useTabBarBottomOffset,
-  useTabBarHeight,
-} from "@/lib/tabBar";
+import { TAB_BAR_PILL_HEIGHT, useTabBarBottomOffset } from "@/lib/tabBar";
 import { useTheme } from "@/lib/theme";
 import { getPalette } from "@/lib/palette";
 
@@ -89,8 +84,6 @@ function TabGlyph({
 export function GlassTabBar({ state, navigation }: BottomTabBarProps) {
   const { scheme } = useTheme();
   const palette = getPalette(scheme);
-  const { hideProgress } = useTabBar();
-  const barHeight = useTabBarHeight();
   const bottomOffset = useTabBarBottomOffset();
 
   const slotWidth = PILL_WIDTH / state.routes.length;
@@ -138,13 +131,6 @@ export function GlassTabBar({ state, navigation }: BottomTabBarProps) {
     transform: [{ translateX: baseX.value + dragX.value }],
   }));
 
-  const barStyle = useAnimatedStyle(() => ({
-    transform: [{ translateY: hideProgress.value * barHeight }],
-    opacity: 1 - hideProgress.value,
-    // Once it's off-screen it must not swallow taps meant for the map.
-    pointerEvents: hideProgress.value > 0.5 ? "none" : "auto",
-  }));
-
   return (
     <Animated.View
       style={[
@@ -160,7 +146,6 @@ export function GlassTabBar({ state, navigation }: BottomTabBarProps) {
           shadowOffset: { width: 0, height: 10 },
           elevation: 12,
         },
-        barStyle,
       ]}
     >
       <GestureDetector gesture={gesture}>
