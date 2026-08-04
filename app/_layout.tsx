@@ -16,7 +16,6 @@ import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { LoadingScreen } from "@/components/LoadingScreen";
 import { LoadingProvider, useBootBlocker } from "@/lib/loading";
 import { MapFocusProvider } from "@/lib/mapFocus";
-import { TabBarProvider } from "@/lib/tabBar";
 import { ThemeProvider, useTheme } from "@/lib/theme";
 
 SplashScreen.preventAutoHideAsync();
@@ -60,23 +59,21 @@ export default function RootLayout() {
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider>
         <LoadingProvider>
-          <TabBarProvider>
-            <MapFocusProvider>
-              <ThemedStatusBar />
-              <FontGate ready={fontsReady} />
-              {fontsReady ? (
-                <Stack screenOptions={{ headerShown: false }}>
-                  <Stack.Screen name="login" />
-                  <Stack.Screen name="(tabs)" />
-                  <Stack.Screen
-                    name="settings"
-                    options={{ presentation: "modal" }}
-                  />
-                </Stack>
-              ) : null}
-              <LoadingScreen />
-            </MapFocusProvider>
-          </TabBarProvider>
+          <MapFocusProvider>
+            <ThemedStatusBar />
+            <FontGate ready={fontsReady} />
+            {fontsReady ? (
+              <Stack screenOptions={{ headerShown: false }}>
+                <Stack.Screen name="login" />
+                <Stack.Screen name="(tabs)" />
+                <Stack.Screen
+                  name="settings"
+                  options={{ presentation: "modal" }}
+                />
+              </Stack>
+            ) : null}
+            <LoadingScreen />
+          </MapFocusProvider>
         </LoadingProvider>
       </ThemeProvider>
     </GestureHandlerRootView>

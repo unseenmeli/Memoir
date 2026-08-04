@@ -1,5 +1,7 @@
 import { useEffect, useState } from "react";
 import { fetchCountry, getCachedCountry, type CountryCode } from "./country";
+import { distanceKm, type Coords } from "./distance";
+import { pinTags } from "./tags";
 
 /**
  * The viewer's country, for search ranking. Reads the cached value first so
@@ -30,6 +32,9 @@ export type SearchablePin = {
   name: string;
   description: string;
   country?: string | null;
+  latitude?: number;
+  longitude?: number;
+  tags?: unknown;
 };
 
 /** Normalizes for accent- and case-insensitive matching. */
@@ -58,6 +63,11 @@ function scoreMatch(pin: SearchablePin, query: string): number {
   // Match at a word boundary ("old TBIlisi") beats mid-word ("isTBIlisi").
   if (new RegExp(`\\b${escapeRegExp(query)}`).test(name)) return 60;
   if (name.includes(query)) return 40;
+  // An exact tag hit ("brunch") is a strong signal — someone deliberately
+  // labelled this place that — so it outranks a passing description mention.
+  const tags = pinTags(pin);
+  if (tags.includes(query)) return 50;
+  if (tags.some((tag) => tag.startsWith(query))) return 30;
   if (description.includes(query)) return 20;
   return 0;
 }
@@ -66,40 +76,86 @@ function escapeRegExp(value: string): string {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
 }
 
+/** Distance from the viewer to a pin, or null if either position is unknown. */
+export function pinDistanceKm(
+  pin: SearchablePin,
+  viewer: Coords | null,
+): number | null {
+  if (!viewer) return null;
+  if (typeof pin.latitude !== "number" || typeof pin.longitude !== "number") {
+    return null;
+  }
+  return distanceKm(viewer, {
+    latitude: pin.latitude,
+    longitude: pin.longitude,
+  });
+}
+
+export type SearchOptions = {
+  /** Viewer position, for distance ranking. Null falls back to name order. */
+  viewer?: Coords | null;
+  /** Only keep pins carrying every one of these (already-normalized) tags. */
+  tags?: string[];
+};
+
 /**
  * Filters and ranks pins for a query.
  *
- * Pins in the viewer's own country are ranked above everything else — that's
- * the "locations from your country pop up first" rule. Within each group the
- * ordering is by match quality, then alphabetical so results are stable rather
- * than shuffling between renders.
+ * Ranking is match quality first, then real distance — so the thing you typed
+ * still wins, but among comparable matches the closest one leads. Distance is
+ * measured from GPS rather than compared by country, which was far too coarse
+ * to distinguish "down the street" from "400km away".
  */
 export function searchPins<T extends SearchablePin>(
   pins: T[],
   query: string,
-  viewerCountry: CountryCode,
+  options: SearchOptions = {},
 ): T[] {
+  const { viewer = null, tags: required = [] } = options;
   const normalized = normalize(query);
-  if (!normalized) return [];
 
-  const scored: { pin: T; score: number; local: boolean }[] = [];
-  for (const pin of pins) {
+  const pool = required.length
+    ? pins.filter((pin) => {
+        const own = pinTags(pin);
+        return required.every((tag) => own.includes(tag));
+      })
+    : pins;
+
+  // No query + a tag filter is a browse, not a search: keep everything that
+  // matched the tags and just order it by distance.
+  if (!normalized) {
+    if (!required.length) return [];
+    return sortByDistance(pool, viewer);
+  }
+
+  const scored: { pin: T; score: number; km: number | null }[] = [];
+  for (const pin of pool) {
     const score = scoreMatch(pin, normalized);
     if (score === 0) continue;
-    scored.push({
-      pin,
-      score,
-      // Unknown country is never "local" — better to under-promote than to
-      // wrongly float a foreign pin to the top.
-      local: Boolean(viewerCountry && pin.country === viewerCountry),
-    });
+    scored.push({ pin, score, km: pinDistanceKm(pin, viewer) });
   }
 
   scored.sort((a, b) => {
-    if (a.local !== b.local) return a.local ? -1 : 1;
     if (a.score !== b.score) return b.score - a.score;
+    // Unknown distance sorts last rather than pretending to be at zero.
+    const aKm = a.km ?? Number.POSITIVE_INFINITY;
+    const bKm = b.km ?? Number.POSITIVE_INFINITY;
+    if (aKm !== bKm) return aKm - bKm;
     return a.pin.name.localeCompare(b.pin.name);
   });
 
   return scored.map((entry) => entry.pin);
+}
+
+/** Nearest-first, with unknown positions last and a stable name tiebreak. */
+export function sortByDistance<T extends SearchablePin>(
+  pins: T[],
+  viewer: Coords | null,
+): T[] {
+  return [...pins].sort((a, b) => {
+    const aKm = pinDistanceKm(a, viewer) ?? Number.POSITIVE_INFINITY;
+    const bKm = pinDistanceKm(b, viewer) ?? Number.POSITIVE_INFINITY;
+    if (aKm !== bKm) return aKm - bKm;
+    return a.name.localeCompare(b.name);
+  });
 }

@@ -8,6 +8,7 @@ import {
   Modal,
   Pressable,
   ScrollView,
+  StyleSheet,
   Text,
   View,
 } from "react-native";
@@ -29,6 +30,8 @@ export type PinRecord = {
   longitude: number;
   /** ISO 3166-1 alpha-2. Absent on pins created before the field existed. */
   country?: string | null;
+  /** Free-form labels, stored normalized. Absent on older pins. */
+  tags?: string[] | null;
   createdAt: number;
   photos: PinPhoto[];
   // `owner` is a has-one link, so Instant returns a single object (or null).
@@ -65,6 +68,44 @@ export function nextPhotoIndex(photos: PinPhoto[]): number {
     -1,
   );
   return highest + 1;
+}
+
+const PHOTO_HEIGHT = Math.round(PHOTO_WIDTH * 0.78);
+
+/**
+ * One photo in the pin's carousel.
+ *
+ * Photos arrive in every shape — portrait phone shots, wide panoramas — and a
+ * fixed-ratio `cover` crop was lopping the top and bottom off tall ones (faces
+ * and skylines lost). This shows the whole image with `contain`, over a
+ * blurred, scaled copy of itself so the frame still reads as filled rather
+ * than letterboxed with dead bars.
+ */
+function PinPhotoFrame({ uri }: { uri: string }) {
+  return (
+    <View
+      style={{
+        width: PHOTO_WIDTH,
+        height: PHOTO_HEIGHT,
+        backgroundColor: "#0d0c0c",
+      }}
+    >
+      <Image
+        source={{ uri }}
+        style={StyleSheet.absoluteFill}
+        resizeMode="cover"
+        blurRadius={22}
+        accessibilityElementsHidden
+        importantForAccessibility="no"
+      />
+      <View style={[StyleSheet.absoluteFill, { backgroundColor: "rgba(0,0,0,0.28)" }]} />
+      <Image
+        source={{ uri }}
+        style={{ width: "100%", height: "100%" }}
+        resizeMode="contain"
+      />
+    </View>
+  );
 }
 
 /** e.g. "Added Jul 28, 2026 at 3:42 PM" */
@@ -180,7 +221,12 @@ export function PinDetails({
     <Modal
       visible={!!pin}
       animationType="slide"
-      presentationStyle="pageSheet"
+      // `pageSheet` uses iOS's own sheet dismissal, a slow spring that made
+      // closing a pin feel laggy. An overlay modal keeps the slide but lets
+      // the dismissal finish promptly.
+      presentationStyle="overFullScreen"
+      transparent
+      statusBarTranslucent
       onRequestClose={onClose}
     >
       <ScreenBackground>
@@ -237,12 +283,7 @@ export function PinDetails({
                     showsHorizontalScrollIndicator={false}
                   >
                     {sortPhotos(pin.photos).map((photo) => (
-                      <Image
-                        key={photo.id}
-                        source={{ uri: photo.url }}
-                        style={{ width: PHOTO_WIDTH, height: PHOTO_WIDTH * 0.75 }}
-                        resizeMode="cover"
-                      />
+                      <PinPhotoFrame key={photo.id} uri={photo.url} />
                     ))}
                   </ScrollView>
                 </View>

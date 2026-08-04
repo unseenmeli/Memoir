@@ -1,6 +1,7 @@
 import { id } from "@instantdb/react-native";
 import type { ImagePickerAsset } from "expo-image-picker";
 import { fetchCountry } from "./country";
+import { normalizeTags } from "./tags";
 import { db } from "./db";
 
 /** Per-user cap on how many pins someone can create. */
@@ -9,6 +10,8 @@ export const MAX_PINS_PER_USER = 400;
 export type NewPinInput = {
   name: string;
   description: string;
+  /** Free-form labels; normalized before write. */
+  tags?: string[];
   latitude: number;
   longitude: number;
   photos: ImagePickerAsset[];
@@ -63,6 +66,7 @@ export async function createPin(
       .update({
         name: input.name.trim(),
         description: input.description.trim(),
+        tags: normalizeTags(input.tags ?? []),
         latitude: input.latitude,
         longitude: input.longitude,
         ...(country ? { country } : {}),
@@ -77,6 +81,8 @@ export async function createPin(
 export type EditPinInput = {
   name: string;
   description: string;
+  /** Free-form labels; normalized before write. */
+  tags?: string[];
   /** Newly picked photos to upload and attach. */
   newPhotos: ImagePickerAsset[];
   /** File ids of existing photos the user removed while editing. */
@@ -111,6 +117,7 @@ export async function updatePin(
       .update({
         name: input.name.trim(),
         description: input.description.trim(),
+        tags: normalizeTags(input.tags ?? []),
       })
       .link({ photos: fileIds }),
   ]);

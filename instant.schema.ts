@@ -21,6 +21,10 @@ const _schema = i.schema({
       // Indexed so search can rank same-country pins first. Optional because
       // pins created before this field existed won't have it.
       country: i.string().indexed().optional(),
+      // Free-form labels ("brunch", "rooftop"), stored normalized (lowercase,
+      // trimmed, deduped) so filtering and counting don't need to re-clean
+      // them. Optional because pins predate the field.
+      tags: i.json<string[]>().optional(),
       createdAt: i.number().indexed(),
     }),
     // Public profile for a signed-in user. One per $user.

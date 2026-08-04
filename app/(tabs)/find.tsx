@@ -8,10 +8,20 @@ import {
   FlatList,
   Image,
   Pressable,
+  ScrollView,
   Text,
   TextInput,
   View,
+  type StyleProp,
+  type ViewStyle,
 } from "react-native";
+import Animated, {
+  FadeIn,
+  LinearTransition,
+  useAnimatedStyle,
+  useSharedValue,
+  withTiming,
+} from "react-native-reanimated";
 import { SafeAreaView } from "react-native-safe-area-context";
 import { AuthGate } from "@/components/AuthGate";
 import { GlassView } from "@/components/GlassView";
@@ -19,11 +29,24 @@ import { PinComposer } from "@/components/PinComposer";
 import { PinDetails, sortPhotos, type PinRecord } from "@/components/PinDetails";
 import { ScreenBackground } from "@/components/ScreenBackground";
 import { db } from "@/lib/db";
+import {
+  distanceKm,
+  formatDistance,
+  proximityOf,
+  useViewerLocation,
+  PROXIMITY_LABEL,
+} from "@/lib/distance";
 import { useBootBlocker } from "@/lib/loading";
 import { useMapFocus } from "@/lib/mapFocus";
 import { darken, getPalette, monoFont } from "@/lib/palette";
 import { usePlaceSearch, type PlaceResult } from "@/lib/places";
-import { searchPins, useViewerCountry } from "@/lib/search";
+import {
+  pinDistanceKm,
+  searchPins,
+  sortByDistance,
+  useViewerCountry,
+} from "@/lib/search";
+import { collectTags, formatTag, pinTags } from "@/lib/tags";
 import { useTabBarHeight } from "@/lib/tabBar";
 import { useTheme } from "@/lib/theme";
 
@@ -99,6 +122,108 @@ function FilterToggle({
   );
 }
 
+const AnimatedPressable = Animated.createAnimatedComponent(Pressable);
+
+/**
+ * A row that dips slightly when pressed. Reads as physically tappable in a
+ * way a plain opacity flash doesn't, and the spring back makes the list feel
+ * responsive rather than static.
+ */
+function PressableRow({
+  onPress,
+  children,
+  style,
+}: {
+  onPress: () => void;
+  children: React.ReactNode;
+  style?: StyleProp<ViewStyle>;
+}) {
+  const pressed = useSharedValue(0);
+
+  const animatedStyle = useAnimatedStyle(() => ({
+    transform: [{ scale: 1 - pressed.value * 0.02 }],
+    opacity: 1 - pressed.value * 0.25,
+  }));
+
+  return (
+    <AnimatedPressable
+      onPress={onPress}
+      onPressIn={() => {
+        pressed.value = withTiming(1, { duration: 90 });
+      }}
+      onPressOut={() => {
+        pressed.value = withTiming(0, { duration: 160 });
+      }}
+      style={[style, animatedStyle]}
+    >
+      {children}
+    </AnimatedPressable>
+  );
+}
+
+/** One selectable label in the tag filter row. */
+function TagChip({
+  tag,
+  count,
+  active,
+  onPress,
+}: {
+  tag: string;
+  count: number;
+  active: boolean;
+  onPress: () => void;
+}) {
+  const { scheme } = useTheme();
+  const p = getPalette(scheme);
+
+  return (
+    <Pressable
+      onPress={onPress}
+      accessibilityRole="button"
+      accessibilityState={{ selected: active }}
+      accessibilityLabel={`${formatTag(tag)}, ${count} ${count === 1 ? "place" : "places"}`}
+      className="active:opacity-70"
+      style={{
+        borderRadius: 999,
+        overflow: "hidden",
+        backgroundColor: active ? p.accent : "transparent",
+        borderWidth: 1,
+        borderColor: active ? p.accent : p.border,
+      }}
+    >
+      <View
+        style={{
+          flexDirection: "row",
+          alignItems: "center",
+          gap: 5,
+          paddingHorizontal: 12,
+          paddingVertical: 6,
+        }}
+      >
+        <Text
+          style={{
+            fontSize: 12.5,
+            fontWeight: active ? "800" : "600",
+            color: active ? p.accentFg : p.text,
+          }}
+        >
+          {formatTag(tag)}
+        </Text>
+        <Text
+          style={{
+            fontSize: 10.5,
+            fontWeight: "700",
+            color: active ? p.accentFg : p.textDim,
+            opacity: active ? 0.75 : 1,
+          }}
+        >
+          {count}
+        </Text>
+      </View>
+    </Pressable>
+  );
+}
+
 /** The gradient tile + pin icon look for results with no photo of their own. */
 function TintedTile({ tint }: { tint: string }) {
   return (
@@ -119,44 +244,70 @@ function TintedTile({ tint }: { tint: string }) {
   );
 }
 
-/** Right-aligned "NEARBY"/"FAR" tag, matching the design's result rows. */
-function DistanceTag({ isLocal }: { isLocal: boolean }) {
+/**
+ * Right-aligned distance readout: the actual distance ("1.2 km") over a band
+ * label ("NEARBY"). Falls back to nothing when location is unavailable —
+ * better blank than the old country-based guess, which called a place 400km
+ * away "NEARBY" purely because it was in the same country.
+ */
+function DistanceTag({ km }: { km: number | null }) {
   const { scheme } = useTheme();
   const p = getPalette(scheme);
+  const band = proximityOf(km);
+  if (km === null || !band) return null;
+
   return (
-    <Text
-      style={{
-        flexShrink: 0,
-        fontSize: 9.5,
-        fontWeight: "800",
-        letterSpacing: 0.8,
-        color: p.textDim,
-      }}
-    >
-      {isLocal ? "NEARBY" : "FAR"}
-    </Text>
+    <View style={{ flexShrink: 0, alignItems: "flex-end" }}>
+      <Text
+        style={{
+          fontSize: 12.5,
+          fontWeight: "700",
+          color: band === "here" || band === "near" ? p.accent : p.text,
+        }}
+      >
+        {formatDistance(km)}
+      </Text>
+      <Text
+        style={{
+          marginTop: 1,
+          fontSize: 9,
+          fontWeight: "800",
+          letterSpacing: 0.8,
+          color: p.textDim,
+        }}
+      >
+        {PROXIMITY_LABEL[band]}
+      </Text>
+    </View>
   );
 }
 
 /** One search hit: thumbnail (real photo if it has one, else a tinted tile), name, description. */
 function ResultRow({
   pin,
-  isLocal,
+  km,
   tint,
   onPress,
 }: {
   pin: PinRecord;
-  isLocal: boolean;
+  km: number | null;
   tint: string;
   onPress: () => void;
 }) {
   const photo = sortPhotos(pin.photos)[0];
 
   return (
-    <Pressable
+    <PressableRow
       onPress={onPress}
-      className="flex-row items-center gap-3.5 px-6 py-2.5"
-      style={{ borderBottomWidth: 1, borderBottomColor: "rgba(128,128,128,0.14)" }}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 14,
+        paddingHorizontal: 24,
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: "rgba(128,128,128,0.14)",
+      }}
     >
       {photo ? (
         <View className="h-[52px] w-[52px] overflow-hidden rounded-xl bg-zinc-100 dark:bg-zinc-800">
@@ -187,28 +338,35 @@ function ResultRow({
         ) : null}
       </View>
 
-      <DistanceTag isLocal={isLocal} />
-    </Pressable>
+      <DistanceTag km={km} />
+    </PressableRow>
   );
 }
 
 /** One live POI result: tinted tile (no photo source for these yet), name, address. */
 function PlaceRow({
   place,
-  isLocal,
+  km,
   tint,
   onPress,
 }: {
   place: PlaceResult;
-  isLocal: boolean;
+  km: number | null;
   tint: string;
   onPress: () => void;
 }) {
   return (
-    <Pressable
+    <PressableRow
       onPress={onPress}
-      className="flex-row items-center gap-3.5 px-6 py-2.5"
-      style={{ borderBottomWidth: 1, borderBottomColor: "rgba(128,128,128,0.14)" }}
+      style={{
+        flexDirection: "row",
+        alignItems: "center",
+        gap: 14,
+        paddingHorizontal: 24,
+        paddingVertical: 10,
+        borderBottomWidth: 1,
+        borderBottomColor: "rgba(128,128,128,0.14)",
+      }}
     >
       <TintedTile tint={tint} />
 
@@ -227,8 +385,8 @@ function PlaceRow({
         </Text>
       </View>
 
-      <DistanceTag isLocal={isLocal} />
-    </Pressable>
+      <DistanceTag km={km} />
+    </PressableRow>
   );
 }
 
@@ -302,7 +460,7 @@ function FindEmptyState({
     <EmptyState
       icon="compass-outline"
       title="Search saved places"
-      body="Find pins by name or description. Places in your country show up first."
+      body="Search by name, description or tag. Closest places show up first."
     />
   );
 }
@@ -319,12 +477,23 @@ function FindContent({ user }: { user: User }) {
   // At most one filter at a time; null means "no filter". Trending is on by
   // default so the page opens with content instead of an empty prompt.
   const [active, setActive] = useState<FilterKey | null>("trending");
+  // Tag chips are additive: a pin must carry every selected tag.
+  const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
   function toggleFilter(key: FilterKey) {
     setActive((current) => (current === key ? null : key));
   }
 
+  function toggleTag(tag: string) {
+    setSelectedTags((current) =>
+      current.includes(tag)
+        ? current.filter((t) => t !== tag)
+        : [...current, tag],
+    );
+  }
+
   const viewerCountry = useViewerCountry();
+  const viewerLocation = useViewerLocation();
 
   const { data, isLoading } = db.useQuery({
     pins: { photos: {}, owner: {} },
@@ -344,10 +513,17 @@ function FindContent({ user }: { user: User }) {
 
   const trimmed = query.trim();
 
-  // Ranked so same-country pins come first, then by match quality.
+  // Every tag in use, most-common first — drives the filter chip row.
+  const allTags = useMemo(() => collectTags(pins), [pins]);
+
+  // Match quality first, then genuine distance from the viewer.
   const results = useMemo(
-    () => searchPins(pins, query, viewerCountry),
-    [pins, query, viewerCountry],
+    () =>
+      searchPins(pins, query, {
+        viewer: viewerLocation,
+        tags: selectedTags,
+      }),
+    [pins, query, viewerLocation, selectedTags],
   );
 
   // Live POI search (restaurants, shops, etc. from OpenStreetMap) — only
@@ -358,16 +534,21 @@ function FindContent({ user }: { user: User }) {
   );
 
   // With no query, an active filter browses the list instead of searching.
-  // Same-country pins still lead, matching the search ordering.
   const browse = useMemo(() => {
-    if (active !== "trending") return [];
-    const local = (pin: PinRecord) =>
-      Boolean(viewerCountry && pin.country === viewerCountry);
-    return [...pins].sort((a, b) => {
-      if (local(a) !== local(b)) return local(a) ? -1 : 1;
-      return b.createdAt - a.createdAt;
-    });
-  }, [active, pins, viewerCountry]);
+    const tagged = selectedTags.length
+      ? pins.filter((pin) => {
+          const own = pinTags(pin);
+          return selectedTags.every((tag) => own.includes(tag));
+        })
+      : pins;
+
+    // Tag chips alone are a browse, even with no view filter selected.
+    if (active !== "trending") {
+      return selectedTags.length ? sortByDistance(tagged, viewerLocation) : [];
+    }
+    // Trending = newest first; that's the whole point of the filter.
+    return [...tagged].sort((a, b) => b.createdAt - a.createdAt);
+  }, [active, pins, selectedTags, viewerLocation]);
 
   // Rows shown in the list: plain saved pins while browsing, or saved pins +
   // live places while searching — each in its own labeled group when both
@@ -499,6 +680,28 @@ function FindContent({ user }: { user: User }) {
               />
             ) : null}
           </View>
+
+          {/* Tag chips — the vocabulary is whatever people have actually
+              written, so this row is empty until pins carry tags. */}
+          {allTags.length > 0 ? (
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={{ gap: 6, paddingVertical: 12, paddingRight: 24 }}
+              style={{ marginHorizontal: -24, paddingHorizontal: 24 }}
+            >
+              {allTags.map(({ tag, count }) => (
+                <TagChip
+                  key={tag}
+                  tag={tag}
+                  count={count}
+                  active={selectedTags.includes(tag)}
+                  onPress={() => toggleTag(tag)}
+                />
+              ))}
+            </ScrollView>
+          ) : null}
         </View>
 
         <FlatList
@@ -513,27 +716,36 @@ function FindContent({ user }: { user: User }) {
               );
             }
             const tint = index % 2 === 0 ? palette.accent : palette.accent2;
-            if (row.kind === "pin") {
-              return (
-                <ResultRow
-                  pin={row.pin}
-                  isLocal={Boolean(
-                    viewerCountry && row.pin.country === viewerCountry,
-                  )}
-                  tint={tint}
-                  onPress={() => setSelected(row.pin)}
-                />
-              );
-            }
             return (
-              <PlaceRow
-                place={row.place}
-                isLocal={Boolean(
-                  viewerCountry && row.place.countryCode === viewerCountry,
+              // Stagger capped so a long list doesn't leave the last rows
+              // visibly waiting to appear.
+              <Animated.View
+                entering={FadeIn.duration(180).delay(Math.min(index, 8) * 22)}
+                layout={LinearTransition.duration(220)}
+              >
+                {row.kind === "pin" ? (
+                  <ResultRow
+                    pin={row.pin}
+                    km={pinDistanceKm(row.pin, viewerLocation)}
+                    tint={tint}
+                    onPress={() => setSelected(row.pin)}
+                  />
+                ) : (
+                  <PlaceRow
+                    place={row.place}
+                    km={
+                      viewerLocation
+                        ? distanceKm(viewerLocation, {
+                            latitude: row.place.latitude,
+                            longitude: row.place.longitude,
+                          })
+                        : null
+                    }
+                    tint={tint}
+                    onPress={() => goToPlaceOnMap(row.place)}
+                  />
                 )}
-                tint={tint}
-                onPress={() => goToPlaceOnMap(row.place)}
-              />
+              </Animated.View>
             );
           }}
           keyboardShouldPersistTaps="handled"
