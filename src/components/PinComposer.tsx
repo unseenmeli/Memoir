@@ -1,6 +1,6 @@
 import { Feather } from "@expo/vector-icons";
 import * as ImagePicker from "expo-image-picker";
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
 import {
   Alert,
   Image,
@@ -8,6 +8,7 @@ import {
   Modal,
   Platform,
   Pressable,
+  StyleSheet,
   ScrollView,
   Text,
   TextInput,
@@ -35,6 +36,40 @@ import { useTheme } from "@/lib/theme";
 type Coordinate = { latitude: number; longitude: number };
 /** An existing pin's photo, kept as-is unless the user removes it. */
 type ExistingPhoto = { id: string; url: string };
+
+/** Orange marker on fields that must be filled before saving. */
+const REQUIRED_COLOR = "#f97316";
+
+/**
+ * A field label, with an orange asterisk when the field is required. Having
+ * one component own this means "what's required" reads the same everywhere
+ * instead of each label styling itself.
+ */
+function FieldLabel({
+  children,
+  required,
+  trailing,
+}: {
+  children: string;
+  required?: boolean;
+  /** Optional right-aligned extra, e.g. a "2/8" counter. */
+  trailing?: ReactNode;
+}) {
+  const { scheme } = useTheme();
+  const palette = getPalette(scheme);
+
+  return (
+    <View className="flex-row items-baseline justify-between">
+      <Text className="text-sm font-outfit-semibold" style={{ color: palette.text }}>
+        {children}
+        {required ? (
+          <Text style={{ color: REQUIRED_COLOR, fontWeight: "800" }}> *</Text>
+        ) : null}
+      </Text>
+      {trailing}
+    </View>
+  );
+}
 
 export function PinComposer({
   visible,
@@ -66,11 +101,16 @@ export function PinComposer({
   );
   const [tags, setTags] = useState<string[]>([]);
   const [tagDraft, setTagDraft] = useState("");
+  // Which field has focus, so the active input can carry an accent ring
+  // instead of every field looking identically inert.
+  const [focusedField, setFocusedField] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState("");
 
   const isEditing = !!editingPin;
   const atLimit = !isEditing && pinCount >= MAX_PINS_PER_USER;
+  // Name is the only required field — everything else can be added later.
+  const canSave = name.trim().length > 0 && !saving && !atLimit;
 
   // The tag vocabulary already in use, for autocomplete. Queried here rather
   // than passed down so the composer works wherever it's mounted.
@@ -241,8 +281,12 @@ export function PinComposer({
               </Text>
               <HeaderPill
                 label="Save"
-                color={palette.accent}
-                disabled={saving || atLimit}
+                // Filled and high-contrast once there's actually something to
+                // save; plain glass while the form is still incomplete, so the
+                // button's state says whether you can proceed.
+                color={canSave ? palette.accentFg : palette.textDim}
+                fill={canSave ? palette.accent : undefined}
+                disabled={!canSave}
                 loading={saving}
                 onPress={handleSave}
               />
@@ -270,12 +314,7 @@ export function PinComposer({
 
               {/* Photos */}
               <View className="gap-2">
-                <Text
-                  className="text-sm font-outfit-medium"
-                  style={{ color: palette.textDim }}
-                >
-                  Photos
-                </Text>
+                <FieldLabel>Photos</FieldLabel>
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
@@ -349,17 +388,14 @@ export function PinComposer({
 
               {/* Name */}
               <View className="gap-2">
-                <Text
-                  className="text-sm font-outfit-medium"
-                  style={{ color: palette.textDim }}
-                >
-                  Name
-                </Text>
+                <FieldLabel required>Name</FieldLabel>
                 <View style={{ borderRadius: 16, overflow: "hidden" }}>
                   <GlassView radius={16} intensity={25}>
                     <TextInput
                       value={name}
                       onChangeText={setName}
+                      onFocus={() => setFocusedField("name")}
+                      onBlur={() => setFocusedField(null)}
                       placeholder="e.g. Fabrika courtyard"
                       placeholderTextColor={palette.textDim}
                       editable={!saving}
@@ -367,17 +403,29 @@ export function PinComposer({
                       style={{ color: palette.text }}
                     />
                   </GlassView>
+                  {/* Accent ring while typing; a soft orange one when the
+                      required field is still empty, so what's blocking Save
+                      is visible without hunting. */}
+                  <View
+                    pointerEvents="none"
+                    style={{
+                      ...StyleSheet.absoluteFillObject,
+                      borderRadius: 16,
+                      borderWidth: 1.5,
+                      borderColor:
+                        focusedField === "name"
+                          ? palette.accent
+                          : name.trim()
+                            ? "transparent"
+                            : `${REQUIRED_COLOR}55`,
+                    }}
+                  />
                 </View>
               </View>
 
               {/* Description */}
               <View className="gap-2">
-                <Text
-                  className="text-sm font-outfit-medium"
-                  style={{ color: palette.textDim }}
-                >
-                  Description
-                </Text>
+                <FieldLabel>Description</FieldLabel>
                 <View style={{ borderRadius: 16, overflow: "hidden" }}>
                   <GlassView radius={16} intensity={25}>
                     <TextInput
@@ -397,20 +445,18 @@ export function PinComposer({
 
               {/* Tags */}
               <View className="gap-2">
-                <View className="flex-row items-baseline justify-between">
-                  <Text
-                    className="text-sm font-outfit-medium"
-                    style={{ color: palette.textDim }}
-                  >
-                    Tags
-                  </Text>
-                  <Text
-                    className="text-xs font-outfit"
-                    style={{ color: palette.textDim }}
-                  >
-                    {tags.length}/{MAX_TAGS_PER_PIN}
-                  </Text>
-                </View>
+                <FieldLabel
+                  trailing={
+                    <Text
+                      className="text-xs font-outfit"
+                      style={{ color: palette.textDim }}
+                    >
+                      {tags.length}/{MAX_TAGS_PER_PIN}
+                    </Text>
+                  }
+                >
+                  Tags
+                </FieldLabel>
 
                 {tags.length > 0 ? (
                   <View className="flex-row flex-wrap gap-2">

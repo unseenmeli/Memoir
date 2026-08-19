@@ -1,11 +1,37 @@
 import { id } from "@instantdb/react-native";
+import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import type { ImagePickerAsset } from "expo-image-picker";
-import { fetchCountry } from "./country";
+import { getCachedCountry } from "./country";
 import { normalizeTags } from "./tags";
 import { db } from "./db";
 
 /** Per-user cap on how many pins someone can create. */
 export const MAX_PINS_PER_USER = 400;
+
+/**
+ * Ceiling on a whole save. Instant queues writes while the socket is down and
+ * the promise simply never settles, which showed up as a Save button spinning
+ * indefinitely with nothing to explain it. Better to surface a real error the
+ * user can act on than to spin forever.
+ */
+const SAVE_TIMEOUT_MS = 20000;
+
+function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
+  return Promise.race([
+    work,
+    new Promise<never>((_, reject) =>
+      setTimeout(
+        () =>
+          reject(
+            new Error(
+              `${label} timed out. Check your connection and try again.`,
+            ),
+          ),
+        SAVE_TIMEOUT_MS,
+      ),
+    ),
+  ]);
+}
 
 export type NewPinInput = {
   name: string;
@@ -21,13 +47,50 @@ export type NewPinInput = {
  * Uploads one picked image to Instant Storage and returns its $files id.
  * The file is stored under the pin's folder so a pin's photos stay grouped.
  */
+/**
+ * Longest edge a stored photo is allowed. Camera originals run 3-8MB each,
+ * which is far more than a phone-sized view ever displays and slow enough to
+ * blow past the backend's transaction window on a mobile connection.
+ */
+const MAX_PHOTO_EDGE = 1600;
+const PHOTO_QUALITY = 0.75;
+
+/** Downscales and re-encodes a picked image so uploads stay quick. */
+async function compressPhoto(asset: ImagePickerAsset): Promise<string> {
+  const longest = Math.max(asset.width ?? 0, asset.height ?? 0);
+  if (!longest || longest <= MAX_PHOTO_EDGE) return asset.uri;
+
+  try {
+    const context = ImageManipulator.manipulate(asset.uri);
+    // Resize by the longer edge so portrait and landscape both land within
+    // the cap without distorting the aspect ratio.
+    if ((asset.width ?? 0) >= (asset.height ?? 0)) {
+      context.resize({ width: MAX_PHOTO_EDGE });
+    } else {
+      context.resize({ height: MAX_PHOTO_EDGE });
+    }
+    const image = await context.renderAsync();
+    const result = await image.saveAsync({
+      compress: PHOTO_QUALITY,
+      format: SaveFormat.JPEG,
+    });
+    return result.uri;
+  } catch {
+    // Compression is an optimization, never a hard requirement — fall back to
+    // the original rather than failing the whole save.
+    return asset.uri;
+  }
+}
+
 async function uploadPhoto(
   pinId: string,
   asset: ImagePickerAsset,
   index: number,
 ): Promise<string> {
+  const uri = await compressPhoto(asset);
+
   // RN can turn a local file:// URI into a Blob via fetch.
-  const response = await fetch(asset.uri);
+  const response = await fetch(uri);
   const blob = await response.blob();
 
   const contentType = asset.mimeType ?? blob.type ?? "image/jpeg";
@@ -35,7 +98,12 @@ async function uploadPhoto(
   const name = asset.fileName ?? `photo-${index}.${extension}`;
   const path = `pins/${pinId}/${index}-${name}`;
 
-  const { data } = await db.storage.uploadFile(path, blob, { contentType });
+  // Uploads get their own ceiling — a stalled upload would otherwise hang the
+  // save before the transaction is even reached.
+  const { data } = await withTimeout(
+    db.storage.uploadFile(path, blob, { contentType }),
+    `Uploading ${name}`,
+  );
   return data.id;
 }
 
@@ -57,10 +125,19 @@ export async function createPin(
   }
 
   // Stamp the pin with the creator's country so search can rank same-country
-  // results first. Best-effort: if the lookup fails the pin is still saved,
-  // just without the boost. Usually resolves from cache instantly.
-  const country = await fetchCountry();
+  // results first. Strictly best-effort: read the cached value only, never
+  // block a save on a network call. The IP service is rate-limited and can
+  // hang, and a missing country just costs a ranking boost — it is never
+  // worth making someone wait to save their pin.
+  const country = await getCachedCountry().catch(() => null);
 
+  // NOTE: not awaited against a wall-clock timeout the way uploads are.
+  // Instant is local-first: `transact` writes to the local store immediately
+  // and syncs in the background, so the pin exists and renders the moment
+  // this resolves locally. Its own server round-trip has a hard 6s window
+  // (see Reactor's timeoutMs), which a slow connection blows through even
+  // though the write is already safe — surfacing that as a save failure was
+  // wrong. Errors still propagate; we just don't hold the UI hostage.
   await db.transact(
     db.tx.pins[pinId]
       .update({
@@ -111,6 +188,7 @@ export async function updatePin(
     );
   }
 
+  // Local-first, same as createPin — see the note there.
   await db.transact([
     ...input.removedPhotoIds.map((fileId) => db.tx.$files[fileId].delete()),
     db.tx.pins[pinId]

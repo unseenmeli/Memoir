@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   Alert,
   FlatList,
+  RefreshControl,
   Image,
   Pressable,
   Text,
@@ -21,6 +22,7 @@ import { PinDetails, sortPhotos, type PinRecord } from "@/components/PinDetails"
 import { ScreenBackground } from "@/components/ScreenBackground";
 import { db } from "@/lib/db";
 import { useBootBlocker } from "@/lib/loading";
+import { useRefresh } from "@/lib/refresh";
 import { useMapFocus } from "@/lib/mapFocus";
 import { getPalette, mix, monoFont } from "@/lib/palette";
 import { ensureProfile, updateAvatar, type ProfileRecord } from "@/lib/profile";
@@ -148,6 +150,7 @@ function ProfileContent({ user }: { user: User }) {
   const barHeight = useTabBarHeight();
   const { scheme } = useTheme();
   const palette = getPalette(scheme);
+  const { refreshing, onRefresh } = useRefresh();
   const [uploading, setUploading] = useState(false);
   const [selected, setSelected] = useState<PinRecord | null>(null);
   const [editing, setEditing] = useState<PinRecord | null>(null);
@@ -427,6 +430,15 @@ function ProfileContent({ user }: { user: User }) {
         columnWrapperStyle={{ paddingHorizontal: 19 }}
         // Clear the floating tab bar so the last pins aren't hidden under it.
         contentContainerStyle={{ paddingBottom: barHeight + 24 }}
+        refreshControl={
+          <RefreshControl
+            refreshing={refreshing}
+            onRefresh={onRefresh}
+            tintColor={palette.textDim}
+            colors={[palette.accent]}
+            progressBackgroundColor={palette.surface}
+          />
+        }
         showsVerticalScrollIndicator={false}
         // Virtualization: only tiles near the viewport are rendered.
         initialNumToRender={8}

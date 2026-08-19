@@ -6,6 +6,7 @@ import { useMemo, useState } from "react";
 import {
   ActivityIndicator,
   FlatList,
+  RefreshControl,
   Image,
   Pressable,
   ScrollView,
@@ -37,6 +38,7 @@ import {
   PROXIMITY_LABEL,
 } from "@/lib/distance";
 import { useBootBlocker } from "@/lib/loading";
+import { useRefresh } from "@/lib/refresh";
 import { useMapFocus } from "@/lib/mapFocus";
 import { darken, getPalette, monoFont } from "@/lib/palette";
 import { usePlaceSearch, type PlaceResult } from "@/lib/places";
@@ -494,6 +496,7 @@ function FindContent({ user }: { user: User }) {
 
   const viewerCountry = useViewerCountry();
   const viewerLocation = useViewerLocation();
+  const { refreshing, onRefresh } = useRefresh();
 
   const { data, isLoading } = db.useQuery({
     pins: { photos: {}, owner: {} },
@@ -751,6 +754,15 @@ function FindContent({ user }: { user: User }) {
           keyboardShouldPersistTaps="handled"
           keyboardDismissMode="on-drag"
           contentContainerStyle={{ paddingTop: 8, paddingBottom: barHeight + 24 }}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={onRefresh}
+              tintColor={palette.textDim}
+              colors={[palette.accent]}
+              progressBackgroundColor={palette.surface}
+            />
+          }
           // Only label the browse lists — search results are self-explanatory
           // (the "Saved pins" / "Places" headers live in `rows` instead).
           ListHeaderComponent={
