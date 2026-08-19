@@ -1,16 +1,18 @@
 import { Feather } from "@expo/vector-icons";
 import { useCallback, useState } from "react";
-import { StyleSheet, View } from "react-native";
+import { StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AuthGate } from "@/components/AuthGate";
 import { GlassView } from "@/components/GlassView";
 import { Map } from "@/components/Map";
 import { TurbineLogo } from "@/components/TurbineLogo";
 import { useBootBlocker } from "@/lib/loading";
-import { getPalette } from "@/lib/palette";
+import { getPalette, mix } from "@/lib/palette";
 import { useTheme } from "@/lib/theme";
 
 const HEADER_HEIGHT = 88;
+/** Vertical space the hint line occupies, so the header clears it. */
+const HINT_HEIGHT = 26;
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -35,10 +37,13 @@ export default function HomeScreen() {
           {/* Full-bleed map — fills the screen and never resizes. */}
           <Map user={user} onReady={handleMapReady} />
 
-          {/* Logo header floats OVER the map, below the status bar. */}
+          {/* Logo header floats OVER the map, below the hint line. */}
           <View
             pointerEvents="box-none"
-            style={[styles.header, { top: insets.top, height: HEADER_HEIGHT }]}
+            style={[
+              styles.header,
+              { top: insets.top + HINT_HEIGHT, height: HEADER_HEIGHT },
+            ]}
           >
             <View className="flex-1 flex-row items-center justify-between px-5">
               <TurbineLogo size={32} />
@@ -66,6 +71,25 @@ export default function HomeScreen() {
               </GlassView>
             </View>
           </View>
+
+          {/* Hint for the map's one non-obvious interaction — long-pressing
+              empty map to drop a pin. Sits at the very top, directly under
+              the status bar / notch, above the logo header. */}
+          <View pointerEvents="none" style={[styles.hint, { top: insets.top }]}>
+            <Text
+              style={{
+                fontSize: 15,
+                fontWeight: "600",
+                // A paler grey than textDim so the hint recedes without the
+                // weight having to drop. Lightens in both themes — mixing
+                // toward `surface` would darken this in dark mode, which is
+                // the wrong direction.
+                color: mix(palette.textDim, "#ffffff", 0.35),
+              }}
+            >
+              Hold to place a pin
+            </Text>
+          </View>
         </View>
       )}
     </AuthGate>
@@ -73,6 +97,14 @@ export default function HomeScreen() {
 }
 
 const styles = StyleSheet.create({
+  hint: {
+    position: "absolute",
+    left: 0,
+    right: 0,
+    height: HINT_HEIGHT,
+    alignItems: "center",
+    justifyContent: "center",
+  },
   header: {
     position: "absolute",
     left: 0,
