@@ -1,16 +1,32 @@
+import { Feather } from "@expo/vector-icons";
 import type { User } from "@instantdb/react-native";
 import { useEffect, useRef, useState } from "react";
-import { Platform, StyleSheet, Text, View } from "react-native";
+import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import MapView, {
   Callout,
   Marker,
   type LongPressEvent,
 } from "react-native-maps";
+import Animated, { FadeInDown, FadeOutDown } from "react-native-reanimated";
+import { GlassView } from "@/components/GlassView";
 import { db } from "@/lib/db";
 import { PinComposer } from "@/components/PinComposer";
 import { PinDetails, type PinRecord } from "@/components/PinDetails";
 import { useMapFocus } from "@/lib/mapFocus";
-import { getLastRegion, setLastRegion } from "@/lib/mapRegion";
+import { useSafeAreaInsets } from "react-native-safe-area-context";
+import {
+  HEADER_HEIGHT,
+  HINT_HEIGHT,
+  getLastRegion,
+  placementRegion,
+  setLastRegion,
+  zoomedRegion,
+} from "@/lib/mapRegion";
+import { getPalette } from "@/lib/palette";
+import {
+  TAB_BAR_PILL_HEIGHT,
+  useTabBarBottomOffset,
+} from "@/lib/tabBar";
 import { useTheme } from "@/lib/theme";
 
 type Coordinate = { latitude: number; longitude: number };
@@ -18,6 +34,127 @@ type Coordinate = { latitude: number; longitude: number };
 // Grace period after the map view lays out, for platforms where `onMapLoaded`
 // never fires (Apple Maps). Long enough for tiles to paint on a warm cache.
 const TILE_SETTLE_MS = 1200;
+
+/** How long the camera takes to frame a freshly-placed pin. */
+const PLACEMENT_ANIM_MS = 520;
+
+/** Zoom button steps are shorter — they're often pressed in quick succession. */
+const ZOOM_ANIM_MS = 220;
+
+/** Matches the header's notification button exactly — same box, same circle. */
+const CONTROL_SIZE = 40;
+const CONTROL_RADIUS = 20;
+
+
+/**
+ * The confirm step between long-pressing and filling out a pin.
+ *
+ * Long-press used to open the composer immediately, which meant committing to
+ * a form before you'd even seen where the pin landed. This shows the spot
+ * first and asks; the composer only opens once you say yes.
+ */
+function PlacementPrompt({
+  onConfirm,
+  onCancel,
+}: {
+  onConfirm: () => void;
+  onCancel: () => void;
+}) {
+  const { scheme } = useTheme();
+  const palette = getPalette(scheme);
+  const bottomOffset = useTabBarBottomOffset();
+
+  return (
+    <Animated.View
+      entering={FadeInDown.duration(240)}
+      exiting={FadeOutDown.duration(160)}
+      style={{
+        position: "absolute",
+        left: 20,
+        right: 20,
+        bottom: bottomOffset + TAB_BAR_PILL_HEIGHT + 16,
+        borderRadius: 24,
+        overflow: "hidden",
+        shadowColor: "#000",
+        shadowOpacity: 0.3,
+        shadowRadius: 18,
+        shadowOffset: { width: 0, height: 8 },
+        elevation: 10,
+      }}
+    >
+      <GlassView radius={24} intensity={45}>
+        <View style={{ padding: 16, gap: 14 }}>
+          <View style={{ gap: 3 }}>
+            <Text
+              style={{
+                fontSize: 16,
+                fontWeight: "700",
+                color: palette.text,
+              }}
+            >
+              New place
+            </Text>
+            <Text
+              style={{ fontSize: 13, fontWeight: "500", color: palette.textDim }}
+            >
+              Drop a memory here, or move the map and hold again.
+            </Text>
+          </View>
+
+          <View style={{ flexDirection: "row", gap: 10 }}>
+            <Pressable
+              onPress={onCancel}
+              accessibilityRole="button"
+              accessibilityLabel="Cancel placing pin"
+              className="active:opacity-70"
+              style={{
+                paddingHorizontal: 18,
+                paddingVertical: 12,
+                borderRadius: 999,
+                borderWidth: 1,
+                borderColor: palette.border,
+              }}
+            >
+              <Text
+                style={{ fontSize: 14, fontWeight: "700", color: palette.text }}
+              >
+                Cancel
+              </Text>
+            </Pressable>
+
+            <Pressable
+              onPress={onConfirm}
+              accessibilityRole="button"
+              accessibilityLabel="Create a memory here"
+              className="active:opacity-80"
+              style={{
+                flex: 1,
+                flexDirection: "row",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 7,
+                paddingVertical: 12,
+                borderRadius: 999,
+                backgroundColor: palette.accent,
+              }}
+            >
+              <Feather name="plus" size={15} color={palette.accentFg} />
+              <Text
+                style={{
+                  fontSize: 14,
+                  fontWeight: "800",
+                  color: palette.accentFg,
+                }}
+              >
+                Create a memory
+              </Text>
+            </Pressable>
+          </View>
+        </View>
+      </GlassView>
+    </Animated.View>
+  );
+}
 
 /**
  * Full-bleed map. Apple Maps on iOS, Google Maps on Android.
@@ -35,12 +172,18 @@ export function Map({
 }) {
   const { target, clear } = useMapFocus();
   const { scheme } = useTheme();
+  const palette = getPalette(scheme);
+  const insets = useSafeAreaInsets();
   const mapRef = useRef<MapView>(null);
   // Keyed by pin id so we can open a specific pin's callout on demand.
   const markerRefs = useRef<Record<string, InstanceType<typeof Marker> | null>>(
     {}
   );
 
+  // Two-step placement: `pending` is the provisional marker the user is
+  // looking at after a long-press; `draft` only gets set once they confirm,
+  // which is what actually opens the composer.
+  const [pending, setPending] = useState<Coordinate | null>(null);
   const [draft, setDraft] = useState<Coordinate | null>(null);
   const [selected, setSelected] = useState<PinRecord | null>(null);
   const [editing, setEditing] = useState<PinRecord | null>(null);
@@ -110,7 +253,28 @@ export function Map({
   }
 
   function handleLongPress(event: LongPressEvent) {
-    setDraft(event.nativeEvent.coordinate);
+    const coordinate = event.nativeEvent.coordinate;
+    setPending(coordinate);
+    // Frame the spot before asking anything — see the place, then decide.
+    mapRef.current?.animateToRegion(
+      placementRegion(coordinate, getLastRegion()),
+      PLACEMENT_ANIM_MS,
+    );
+  }
+
+  function zoom(direction: "in" | "out") {
+    // `getLastRegion` tracks the live camera via onRegionChangeComplete, so
+    // stepping from it keeps repeated presses consistent with what's on screen.
+    mapRef.current?.animateToRegion(
+      zoomedRegion(getLastRegion(), direction),
+      ZOOM_ANIM_MS,
+    );
+  }
+
+  function confirmPending() {
+    if (!pending) return;
+    setDraft(pending);
+    setPending(null);
   }
 
   return (
@@ -150,7 +314,79 @@ export function Map({
             </Callout>
           </Marker>
         ))}
+
+        {/* Provisional marker — where the long-press landed, not yet saved. */}
+        {pending ? (
+          <Marker coordinate={pending} anchor={{ x: 0.5, y: 0.5 }}>
+            <View style={styles.pendingWrap}>
+              <View style={styles.pendingHalo} />
+              <View style={styles.pendingDot} />
+            </View>
+          </Marker>
+        ) : null}
       </MapView>
+
+      {/* Zoom controls — two circles matching the header's notification
+          button exactly (40pt, fully round, same right margin), stacked
+          beneath it so the three read as one column. */}
+      <View
+        style={{
+          position: "absolute",
+          // Clear the header's full height, not just the bell's bottom edge —
+          // the header paints after the map, so anything overlapping it gets
+          // covered rather than layered.
+          top: insets.top + HINT_HEIGHT + HEADER_HEIGHT + 10,
+          // Nudged tighter to the edge than the header's 20px padding so the
+          // buttons line up under the notification bell on screen.
+          right: 15,
+          alignItems: "flex-end",
+          gap: 8,
+        }}
+      >
+        {([
+          { icon: "plus", label: "Zoom in", direction: "in" },
+          { icon: "minus", label: "Zoom out", direction: "out" },
+        ] as const).map((button) => (
+          <Pressable
+            key={button.direction}
+            onPress={() => zoom(button.direction)}
+            accessibilityRole="button"
+            accessibilityLabel={button.label}
+            className="active:opacity-60"
+            style={{
+              width: CONTROL_SIZE,
+              height: CONTROL_SIZE,
+              borderRadius: CONTROL_RADIUS,
+              overflow: "hidden",
+              shadowColor: "#000",
+              shadowOpacity: 0.18,
+              shadowRadius: 8,
+              shadowOffset: { width: 0, height: 3 },
+            }}
+          >
+            {/* GlassView lays its layers out with absoluteFill, so it needs
+                explicit dimensions — without them it collapses to nothing and
+                the button renders invisible. */}
+            <GlassView
+              radius={CONTROL_RADIUS}
+              intensity={30}
+              style={{ width: CONTROL_SIZE, height: CONTROL_SIZE }}
+            >
+              <View className="flex-1 items-center justify-center">
+                <Feather name={button.icon} size={17} color={palette.text} />
+              </View>
+            </GlassView>
+          </Pressable>
+        ))}
+      </View>
+
+      {/* Confirmation step: see the spot first, then decide to keep it. */}
+      {pending ? (
+        <PlacementPrompt
+          onConfirm={confirmPending}
+          onCancel={() => setPending(null)}
+        />
+      ) : null}
 
       <PinComposer
         visible={!!draft || !!editing}
@@ -187,6 +423,31 @@ export function Map({
 }
 
 const styles = StyleSheet.create({
+  // Provisional marker: a pulsing-looking halo around a solid dot, visually
+  // distinct from saved pins so it never reads as already-saved.
+  pendingWrap: {
+    width: 44,
+    height: 44,
+    alignItems: "center",
+    justifyContent: "center",
+  },
+  pendingHalo: {
+    position: "absolute",
+    width: 44,
+    height: 44,
+    borderRadius: 22,
+    backgroundColor: "rgba(125,148,168,0.28)",
+    borderWidth: 1.5,
+    borderColor: "rgba(125,148,168,0.7)",
+  },
+  pendingDot: {
+    width: 15,
+    height: 15,
+    borderRadius: 8,
+    backgroundColor: "#7d94a8",
+    borderWidth: 2.5,
+    borderColor: "#ffffff",
+  },
   calloutWrap: {
     alignItems: "center",
   },

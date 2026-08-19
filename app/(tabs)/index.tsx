@@ -7,12 +7,9 @@ import { GlassView } from "@/components/GlassView";
 import { Map } from "@/components/Map";
 import { TurbineLogo } from "@/components/TurbineLogo";
 import { useBootBlocker } from "@/lib/loading";
+import { HEADER_HEIGHT, HINT_HEIGHT } from "@/lib/mapRegion";
 import { getPalette, mix } from "@/lib/palette";
 import { useTheme } from "@/lib/theme";
-
-const HEADER_HEIGHT = 88;
-/** Vertical space the hint line occupies, so the header clears it. */
-const HINT_HEIGHT = 26;
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
