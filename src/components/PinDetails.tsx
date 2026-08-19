@@ -130,6 +130,7 @@ export function HeaderPill({
   onPress,
   disabled,
   loading,
+  fill,
 }: {
   label: string;
   color: string;
@@ -137,7 +138,32 @@ export function HeaderPill({
   disabled?: boolean;
   /** Shows a spinner in place of the label — e.g. while saving. */
   loading?: boolean;
+  /**
+   * Solid background instead of glass. Used for the primary action once it's
+   * actually available, so "ready to save" is obvious at a glance rather than
+   * being another grey pill among grey pills.
+   */
+  fill?: string;
 }) {
+  const body = (
+    <View
+      style={{
+        paddingHorizontal: 16,
+        paddingVertical: 8,
+        minWidth: loading ? 40 : undefined,
+        alignItems: "center",
+      }}
+    >
+      {loading ? (
+        <ActivityIndicator size="small" color={color} />
+      ) : (
+        <Text className="text-sm font-outfit-semibold" style={{ color }}>
+          {label}
+        </Text>
+      )}
+    </View>
+  );
+
   return (
     <Pressable
       onPress={onPress}
@@ -146,24 +172,13 @@ export function HeaderPill({
       className="active:opacity-70 disabled:opacity-40"
       style={{ borderRadius: 999, overflow: "hidden" }}
     >
-      <GlassView radius={999} intensity={30}>
-        <View
-          style={{
-            paddingHorizontal: 16,
-            paddingVertical: 8,
-            minWidth: loading ? 40 : undefined,
-            alignItems: "center",
-          }}
-        >
-          {loading ? (
-            <ActivityIndicator size="small" color={color} />
-          ) : (
-            <Text className="text-sm font-outfit-semibold" style={{ color }}>
-              {label}
-            </Text>
-          )}
-        </View>
-      </GlassView>
+      {fill ? (
+        <View style={{ backgroundColor: fill }}>{body}</View>
+      ) : (
+        <GlassView radius={999} intensity={30}>
+          {body}
+        </GlassView>
+      )}
     </Pressable>
   );
 }
