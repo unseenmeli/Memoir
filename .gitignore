@@ -43,3 +43,8 @@ yarn-error.*
 # env files
 .env*
 !.env.example
+
+# editor swap files
+*.swp
+*.swo
+*.swn

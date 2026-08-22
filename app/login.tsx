@@ -1,21 +1,29 @@
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
+  ActivityIndicator,
   KeyboardAvoidingView,
   Platform,
   Pressable,
   Text,
-  TextInput,
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
+import { MagicCodeForm, errorMessage } from "@/components/MagicCodeForm";
 import { db } from "@/lib/db";
+import { seedExamplePins } from "@/lib/demo";
+import { haptics } from "@/lib/haptics";
 import { useBootBlocker } from "@/lib/loading";
+import { getPalette } from "@/lib/palette";
+import { useTheme } from "@/lib/theme";
 
 export default function LoginScreen() {
   const router = useRouter();
+  const { scheme } = useTheme();
+  const palette = getPalette(scheme);
   const { isLoading, user } = db.useAuth();
-  const [sentEmail, setSentEmail] = useState("");
+  const [guestPending, setGuestPending] = useState(false);
+  const [guestError, setGuestError] = useState("");
 
   // Keep the boot splash up while auth resolves; if we're signed in we're
   // about to bounce to "/", so let the splash ride through that too rather
@@ -28,167 +36,93 @@ export default function LoginScreen() {
     }
   }, [isLoading, user, router]);
 
+  /**
+   * Guest sign-in. Two jobs: it lets someone try the app before handing over
+   * an email, and it is the only way an App Review tester can get in at all —
+   * magic codes go to a live inbox they don't have access to.
+   *
+   * Instant upgrades a guest in place when they later sign in with an email,
+   * keeping everything they made, so this is not a dead-end trial.
+   */
+  async function continueAsGuest() {
+    if (guestPending) return;
+    setGuestPending(true);
+    setGuestError("");
+    try {
+      const result = await db.auth.signInAsGuest();
+      haptics.success();
+      // A few obviously-labelled sample pins, so the map isn't empty on the
+      // very first run. Never blocks entry if it fails.
+      await seedExamplePins(result.user.id).catch(() => {});
+    } catch (err) {
+      haptics.error();
+      setGuestError(
+        errorMessage(err) ?? "Couldn't start a guest session. Try again.",
+      );
+      setGuestPending(false);
+    }
+  }
+
   if (isLoading || user) {
-    return <View className="flex-1 bg-white dark:bg-zinc-950" />;
+    return <View className="flex-1" style={{ backgroundColor: palette.bg }} />;
   }
 
   return (
-    <SafeAreaView className="flex-1 bg-white dark:bg-zinc-950">
+    <SafeAreaView className="flex-1" style={{ backgroundColor: palette.bg }}>
       <KeyboardAvoidingView
         className="flex-1"
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <View className="flex-1 justify-center px-6">
-          {sentEmail ? (
-            <CodeForm email={sentEmail} onBack={() => setSentEmail("")} />
-          ) : (
-            <EmailForm onSent={setSentEmail} />
-          )}
+          <MagicCodeForm />
+
+          <View className="mt-8 gap-3">
+            <View className="flex-row items-center gap-3">
+              <View style={{ flex: 1, height: 1, backgroundColor: palette.border }} />
+              <Text className="text-xs font-outfit" style={{ color: palette.textDim }}>
+                or
+              </Text>
+              <View style={{ flex: 1, height: 1, backgroundColor: palette.border }} />
+            </View>
+
+            <Pressable
+              onPress={continueAsGuest}
+              disabled={guestPending}
+              accessibilityRole="button"
+              accessibilityLabel="Look around first without an account"
+              className="items-center rounded-xl px-4 py-3.5 active:opacity-70 disabled:opacity-50"
+              style={{ borderWidth: 1, borderColor: palette.border }}
+            >
+              {guestPending ? (
+                <ActivityIndicator size="small" color={palette.text} />
+              ) : (
+                <Text
+                  className="text-base font-outfit-medium"
+                  style={{ color: palette.text }}
+                >
+                  Look around first
+                </Text>
+              )}
+            </Pressable>
+
+            <Text
+              className="text-center text-xs font-outfit"
+              style={{ color: palette.textDim }}
+            >
+              You can add your email later — your pins come with you.
+            </Text>
+
+            {guestError ? (
+              <Text
+                className="text-center text-sm font-outfit"
+                style={{ color: "#ef4444" }}
+              >
+                {guestError}
+              </Text>
+            ) : null}
+          </View>
         </View>
       </KeyboardAvoidingView>
     </SafeAreaView>
   );
-}
-
-function EmailForm({ onSent }: { onSent: (email: string) => void }) {
-  const [email, setEmail] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleSubmit() {
-    const trimmed = email.trim();
-    if (!trimmed || pending) return;
-
-    setPending(true);
-    setError("");
-    try {
-      await db.auth.sendMagicCode({ email: trimmed });
-      onSent(trimmed);
-    } catch (err) {
-      setError(errorMessage(err) ?? "Could not send the code. Try again.");
-      setPending(false);
-    }
-  }
-
-  return (
-    <View className="gap-4">
-      <View className="gap-1">
-        <Text className="text-3xl font-outfit-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-          Sign in
-        </Text>
-        <Text className="text-base text-zinc-500 font-outfit dark:text-zinc-400">
-          We&apos;ll email you a one-time code.
-        </Text>
-      </View>
-
-      <TextInput
-        value={email}
-        onChangeText={setEmail}
-        placeholder="you@example.com"
-        placeholderTextColor="#a1a1aa"
-        keyboardType="email-address"
-        autoCapitalize="none"
-        autoCorrect={false}
-        autoComplete="email"
-        textContentType="emailAddress"
-        editable={!pending}
-        returnKeyType="go"
-        onSubmitEditing={handleSubmit}
-        className="rounded-xl border border-zinc-300 px-4 py-3.5 text-base text-zinc-900 font-outfit dark:border-zinc-700 dark:text-zinc-100"
-      />
-
-      {error ? (
-        <Text className="text-sm text-red-600 font-outfit dark:text-red-400">
-          {error}
-        </Text>
-      ) : null}
-
-      <Pressable
-        onPress={handleSubmit}
-        disabled={pending}
-        className="items-center rounded-xl bg-zinc-900 px-4 py-3.5 active:opacity-80 disabled:opacity-50 dark:bg-zinc-100"
-      >
-        <Text className="text-base font-outfit-medium text-white dark:text-zinc-900">
-          {pending ? "Sending…" : "Send code"}
-        </Text>
-      </Pressable>
-    </View>
-  );
-}
-
-function CodeForm({ email, onBack }: { email: string; onBack: () => void }) {
-  const [code, setCode] = useState("");
-  const [pending, setPending] = useState(false);
-  const [error, setError] = useState("");
-
-  async function handleSubmit() {
-    const trimmed = code.trim();
-    if (!trimmed || pending) return;
-
-    setPending(true);
-    setError("");
-    try {
-      await db.auth.signInWithMagicCode({ email, code: trimmed });
-      // On success useAuth updates and this screen redirects to "/".
-    } catch (err) {
-      setError(errorMessage(err) ?? "That code didn't work. Try again.");
-      setCode("");
-      setPending(false);
-    }
-  }
-
-  return (
-    <View className="gap-4">
-      <View className="gap-1">
-        <Text className="text-3xl font-outfit-semibold tracking-tight text-zinc-900 dark:text-zinc-50">
-          Enter code
-        </Text>
-        <Text className="text-base text-zinc-500 font-outfit dark:text-zinc-400">
-          We sent a code to{" "}
-          <Text className="text-zinc-900 dark:text-zinc-100">{email}</Text>.
-        </Text>
-      </View>
-
-      <TextInput
-        value={code}
-        onChangeText={setCode}
-        placeholder="123456"
-        placeholderTextColor="#a1a1aa"
-        keyboardType="number-pad"
-        autoComplete="one-time-code"
-        textContentType="oneTimeCode"
-        editable={!pending}
-        autoFocus
-        returnKeyType="go"
-        onSubmitEditing={handleSubmit}
-        className="rounded-xl border border-zinc-300 px-4 py-3.5 text-center text-2xl tracking-[8px] text-zinc-900 font-outfit dark:border-zinc-700 dark:text-zinc-100"
-      />
-
-      {error ? (
-        <Text className="text-sm text-red-600 font-outfit dark:text-red-400">
-          {error}
-        </Text>
-      ) : null}
-
-      <Pressable
-        onPress={handleSubmit}
-        disabled={pending}
-        className="items-center rounded-xl bg-zinc-900 px-4 py-3.5 active:opacity-80 disabled:opacity-50 dark:bg-zinc-100"
-      >
-        <Text className="text-base font-outfit-medium text-white dark:text-zinc-900">
-          {pending ? "Verifying…" : "Verify"}
-        </Text>
-      </Pressable>
-
-      <Pressable onPress={onBack} className="items-center py-2">
-        <Text className="text-sm text-zinc-500 font-outfit dark:text-zinc-400">
-          Use a different email
-        </Text>
-      </Pressable>
-    </View>
-  );
-}
-
-function errorMessage(err: unknown): string | undefined {
-  return (err as { body?: { message?: string } })?.body?.message;
 }

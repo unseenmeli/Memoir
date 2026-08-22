@@ -4,34 +4,18 @@ import type { ImagePickerAsset } from "expo-image-picker";
 import { getCachedCountry } from "./country";
 import { normalizeTags } from "./tags";
 import { db } from "./db";
-
-/** Per-user cap on how many pins someone can create. */
-export const MAX_PINS_PER_USER = 400;
+import { withTimeout } from "./timeout";
 
 /**
- * Ceiling on a whole save. Instant queues writes while the socket is down and
- * the promise simply never settles, which showed up as a Save button spinning
- * indefinitely with nothing to explain it. Better to surface a real error the
- * user can act on than to spin forever.
+ * Per-user cap on how many pins someone can create.
+ *
+ * NOTE: this is a UI affordance only. Instant's rule language has no aggregate
+ * or count primitive, so a total-pin cap cannot be enforced server-side — a
+ * modified client calling `createPin` directly can exceed it. If abuse ever
+ * matters, the available lever is a `$rateLimits` bucket on `pins.create`,
+ * which caps the *rate* rather than the total.
  */
-const SAVE_TIMEOUT_MS = 20000;
-
-function withTimeout<T>(work: Promise<T>, label: string): Promise<T> {
-  return Promise.race([
-    work,
-    new Promise<never>((_, reject) =>
-      setTimeout(
-        () =>
-          reject(
-            new Error(
-              `${label} timed out. Check your connection and try again.`,
-            ),
-          ),
-        SAVE_TIMEOUT_MS,
-      ),
-    ),
-  ]);
-}
+export const MAX_PINS_PER_USER = 400;
 
 export type NewPinInput = {
   name: string;
@@ -43,10 +27,6 @@ export type NewPinInput = {
   photos: ImagePickerAsset[];
 };
 
-/**
- * Uploads one picked image to Instant Storage and returns its $files id.
- * The file is stored under the pin's folder so a pin's photos stay grouped.
- */
 /**
  * Longest edge a stored photo is allowed. Camera originals run 3-8MB each,
  * which is far more than a phone-sized view ever displays and slow enough to
@@ -82,7 +62,13 @@ async function compressPhoto(asset: ImagePickerAsset): Promise<string> {
   }
 }
 
+/**
+ * Uploads one picked image to Instant Storage and returns its $files id.
+ * The file is stored under the owner's folder, then the pin's, so a pin's
+ * photos stay grouped and the whole tree is covered by one ownership rule.
+ */
 async function uploadPhoto(
+  userId: string,
   pinId: string,
   asset: ImagePickerAsset,
   index: number,
@@ -96,7 +82,11 @@ async function uploadPhoto(
   const contentType = asset.mimeType ?? blob.type ?? "image/jpeg";
   const extension = contentType.split("/")[1] ?? "jpg";
   const name = asset.fileName ?? `photo-${index}.${extension}`;
-  const path = `pins/${pinId}/${index}-${name}`;
+  // Every path starts with the owner's auth id because that prefix IS the
+  // access rule: `$files` permissions can only see `data.path` (no link
+  // traversal), so `data.path.startsWith(auth.id + '/')` is the only way to
+  // stop one user deleting or overwriting another user's photos.
+  const path = `${userId}/pins/${pinId}/${index}-${name}`;
 
   // Uploads get their own ceiling — a stalled upload would otherwise hang the
   // save before the transaction is even reached.
@@ -121,7 +111,7 @@ export async function createPin(
   // once; a pin rarely has more than a handful of photos.
   const fileIds: string[] = [];
   for (let i = 0; i < input.photos.length; i++) {
-    fileIds.push(await uploadPhoto(pinId, input.photos[i], i));
+    fileIds.push(await uploadPhoto(userId, pinId, input.photos[i], i));
   }
 
   // Stamp the pin with the creator's country so search can rank same-country
@@ -178,13 +168,19 @@ export type EditPinInput = {
  * (their $files rows), new ones are uploaded and linked, in one transaction.
  */
 export async function updatePin(
+  userId: string,
   pinId: string,
   input: EditPinInput,
 ): Promise<void> {
   const fileIds: string[] = [];
   for (let i = 0; i < input.newPhotos.length; i++) {
     fileIds.push(
-      await uploadPhoto(pinId, input.newPhotos[i], input.startPhotoIndex + i),
+      await uploadPhoto(
+        userId,
+        pinId,
+        input.newPhotos[i],
+        input.startPhotoIndex + i,
+      ),
     );
   }
 

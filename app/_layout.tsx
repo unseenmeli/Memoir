@@ -68,7 +68,11 @@ export default function RootLayout() {
                 <Stack.Screen name="(tabs)" />
                 <Stack.Screen
                   name="settings"
-                  options={{ presentation: "modal" }}
+                  // `transparentModal` (rather than the opaque `modal`) keeps
+                  // the profile screen underneath in the view hierarchy, so
+                  // the sheet's own glass background can actually blur real
+                  // content instead of blurring nothing.
+                  options={{ presentation: "transparentModal", animation: "slide_from_bottom" }}
                 />
               </Stack>
             ) : null}

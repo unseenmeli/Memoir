@@ -26,12 +26,18 @@ const TIMEOUT_MS = 6000;
 const RESULT_LIMIT = 8;
 
 // Nominatim's usage policy requires identifying the calling app via
-// User-Agent (or Referer). Browsers refuse to let scripts set User-Agent, so
+// User-Agent (or Referer) AND giving their operators a way to reach whoever
+// runs it — a bundle id alone doesn't let anyone contact you before they
+// throttle or block you. Browsers refuse to let scripts set User-Agent, so
 // this only applies on native, where fetch has no such restriction.
+//
+// TODO(before submitting): replace the placeholder with a real contact address
+// or project URL you actually monitor.
+const CONTACT = "REPLACE_WITH_CONTACT_EMAIL_OR_URL";
 const HEADERS =
   Platform.OS === "web"
     ? undefined
-    : { "User-Agent": "NewEraMapsApp/1.0 (com.newera.app)" };
+    : { "User-Agent": `NewEra/1.0 (com.newera.app; ${CONTACT})` };
 
 type NominatimHit = {
   place_id: number;
@@ -115,24 +121,30 @@ export function usePlaceSearch(
 
       (async () => {
         try {
-          const [local, global] = await Promise.all([
-            viewerCountry
-              ? searchNominatim(trimmed, {
-                  countryCode: viewerCountry,
-                  signal: controller.signal,
-                }).catch(() => [])
-              : Promise.resolve([]),
-            searchNominatim(trimmed, { signal: controller.signal }).catch(
-              () => [],
-            ),
-          ]);
+          // One request per search, not two. This used to fire a
+          // country-scoped and a worldwide query in parallel, which made the
+          // "well under 1 request/second" claim above false — two concurrent
+          // requests per debounce is ~4/s while someone is actively typing,
+          // and Nominatim's policy is read as no-concurrent-requests. Local
+          // relevance is recovered by ranking rather than by a second call.
+          const found = await searchNominatim(trimmed, {
+            signal: controller.signal,
+          }).catch(() => []);
 
           // A newer keystroke started a fresh request — don't overwrite it.
           if (controllerRef.current !== controller) return;
 
           const seen = new Set<string>();
           const merged: PlaceResult[] = [];
-          for (const place of [...local, ...global]) {
+          // Same-country hits first: cheaper than a second round-trip and it
+          // answers the same "places near me" intent.
+          const ranked = viewerCountry
+            ? [
+                ...found.filter((p) => p.countryCode === viewerCountry),
+                ...found.filter((p) => p.countryCode !== viewerCountry),
+              ]
+            : found;
+          for (const place of ranked) {
             if (seen.has(place.id)) continue;
             seen.add(place.id);
             merged.push(place);

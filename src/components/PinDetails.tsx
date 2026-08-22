@@ -1,20 +1,26 @@
 import { Feather } from "@expo/vector-icons";
-import { useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
   Dimensions,
   Image,
   Modal,
+  NativeScrollEvent,
+  NativeSyntheticEvent,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import Animated from "react-native-reanimated";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { GlassSheetBackground } from "@/components/GlassSheetBackground";
 import { GlassView } from "@/components/GlassView";
-import { ScreenBackground } from "@/components/ScreenBackground";
+import { useDragToDismiss } from "@/lib/dragToDismiss";
+import { haptics } from "@/lib/haptics";
 import { deletePin } from "@/lib/pins";
 import { getPalette, monoFont } from "@/lib/palette";
 import { useTheme } from "@/lib/theme";
@@ -43,12 +49,18 @@ const PHOTO_WIDTH = Dimensions.get("window").width - 40;
 /**
  * Instant doesn't guarantee any particular order for a pin's `photos` link,
  * so relying on query order to mean "upload order" is unreliable. Each
- * photo's storage path is `pins/{pinId}/{index}-{name}` (see `uploadPhoto` in
+ * photo's storage path ends in `{index}-{name}` (see `uploadPhoto` in
  * lib/pins.ts), so sort by that index instead — this is what makes "the
  * first picture" stable everywhere it's shown.
+ *
+ * Anchored to the final path segment on purpose. Matching `/(\d+)-` anywhere
+ * in the path used to hit the *pin id* first whenever a UUID happened to start
+ * with 8 digits (~2.3% of them), which handed every photo on that pin the same
+ * bogus index — precisely the collision `nextPhotoIndex` exists to prevent.
  */
 function photoPathIndex(photo: PinPhoto): number | null {
-  const match = photo.path?.match(/\/(\d+)-/);
+  const basename = photo.path?.split("/").pop() ?? "";
+  const match = basename.match(/^(\d+)-/);
   return match ? parseInt(match[1], 10) : null;
 }
 
@@ -183,6 +195,49 @@ export function HeaderPill({
   );
 }
 
+/**
+ * A round glass icon button for secondary header actions (Edit/Delete) —
+ * lighter-weight than a text pill, matching the compact icon toolbars native
+ * detail screens (e.g. Photos) use once there's more than one action.
+ */
+function IconHeaderButton({
+  icon,
+  color,
+  onPress,
+  disabled,
+  loading,
+  accessibilityLabel,
+}: {
+  icon: keyof typeof Feather.glyphMap;
+  color: string;
+  onPress: () => void;
+  disabled?: boolean;
+  loading?: boolean;
+  accessibilityLabel: string;
+}) {
+  return (
+    <Pressable
+      onPress={onPress}
+      disabled={disabled}
+      hitSlop={6}
+      accessibilityRole="button"
+      accessibilityLabel={accessibilityLabel}
+      className="active:opacity-70 disabled:opacity-40"
+      style={{ borderRadius: 999, overflow: "hidden" }}
+    >
+      <GlassView radius={999} intensity={30}>
+        <View style={{ width: 38, height: 38, alignItems: "center", justifyContent: "center" }}>
+          {loading ? (
+            <ActivityIndicator size="small" color={color} />
+          ) : (
+            <Feather name={icon} size={16} color={color} />
+          )}
+        </View>
+      </GlassView>
+    </Pressable>
+  );
+}
+
 export function PinDetails({
   pin,
   currentUserId,
@@ -201,8 +256,28 @@ export function PinDetails({
   const { scheme } = useTheme();
   const palette = getPalette(scheme);
   const [deleting, setDeleting] = useState(false);
+  const [photoIndex, setPhotoIndex] = useState(0);
 
   const isOwner = !!pin && pin.owner?.id === currentUserId;
+  const sortedPhotos = useMemo(() => (pin ? sortPhotos(pin.photos) : []), [pin]);
+  const { gesture: dragGesture, style: dragStyle, reset: resetDrag } =
+    useDragToDismiss(onClose, !deleting);
+
+  // Land back on the first photo (and the top of the sheet) whenever a
+  // different pin opens, so nothing resumes mid-scroll/mid-drag from the
+  // last pin that was shown. Deliberately does nothing on the way *out*:
+  // snapping the sheet back to the top while the modal is still playing its
+  // closing animation is what made a drag-down flick back up at the end.
+  useEffect(() => {
+    if (!pin) return;
+    setPhotoIndex(0);
+    resetDrag();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [pin?.id]);
+
+  function handlePhotoScrollEnd(e: NativeSyntheticEvent<NativeScrollEvent>) {
+    setPhotoIndex(Math.round(e.nativeEvent.contentOffset.x / PHOTO_WIDTH));
+  }
 
   function confirmDelete() {
     if (!pin) return;
@@ -218,8 +293,10 @@ export function PinDetails({
               pin.id,
               pin.photos.map((p) => p.id),
             );
+            haptics.success();
             onClose();
           } catch (err) {
+            haptics.error();
             Alert.alert(
               "Couldn't delete",
               (err as Error)?.message ?? "Try again.",
@@ -244,150 +321,207 @@ export function PinDetails({
       statusBarTranslucent
       onRequestClose={onClose}
     >
-      <ScreenBackground>
-        <SafeAreaView className="flex-1" edges={["top", "bottom"]}>
-          {/* Grabber handle — matches the settings sheet's chrome. */}
-          <View className="items-center pt-2">
-            <View
-              style={{
-                width: 36,
-                height: 4.5,
-                borderRadius: 3,
-                backgroundColor: palette.border,
-              }}
-            />
-          </View>
-
-          {/* Header */}
-          <View className="flex-row items-center justify-between px-5 py-3">
-            <HeaderPill label="Close" color={palette.accent} onPress={onClose} />
-            {isOwner ? (
-              <View className="flex-row items-center gap-2">
-                {onEdit && pin ? (
-                  <HeaderPill
-                    label="Edit"
-                    color={palette.text}
-                    disabled={deleting}
-                    onPress={() => onEdit(pin)}
-                  />
-                ) : null}
-                <HeaderPill
-                  label={deleting ? "Deleting…" : "Delete"}
-                  color="#ef4444"
-                  disabled={deleting}
-                  onPress={confirmDelete}
-                />
-              </View>
-            ) : null}
-          </View>
-
-          {pin ? (
-            <ScrollView className="flex-1" contentContainerClassName="px-5 pb-10 pt-8">
-              {/* Photos */}
-              {pin.photos.length > 0 ? (
-                <View
-                  style={{
-                    borderRadius: 20,
-                    overflow: "hidden",
-                    backgroundColor: palette.surface2,
-                  }}
-                >
-                  <ScrollView
-                    horizontal
-                    pagingEnabled
-                    showsHorizontalScrollIndicator={false}
-                  >
-                    {sortPhotos(pin.photos).map((photo) => (
-                      <PinPhotoFrame key={photo.id} uri={photo.url} />
-                    ))}
-                  </ScrollView>
-                </View>
-              ) : (
-                <View style={{ height: 160, borderRadius: 20, overflow: "hidden" }}>
-                  <GlassView radius={20} intensity={20}>
-                    <View className="flex-1 items-center justify-center">
-                      <Feather name="image" size={28} color={palette.textDim} />
-                      <Text
-                        className="mt-2 text-sm font-outfit"
-                        style={{ color: palette.textDim }}
-                      >
-                        No photos
-                      </Text>
+      {/*
+       * A React Native `Modal` mounts into its own native window, separate
+       * from the app's root view — with `transparent`+`statusBarTranslucent`
+       * that window's own safe-area insets don't reliably reach the outer
+       * `SafeAreaProvider` from `_layout.tsx`, so `SafeAreaView` below can
+       * read a stale/zero top inset and let the header row sit under the
+       * status bar. Nesting a fresh provider here forces a real measurement
+       * scoped to this window. Gesture handler needs the same treatment
+       * (`GestureHandlerRootView`) for the same reason, or the drag-to-close
+       * handle below silently never recognizes touches.
+       */}
+      <SafeAreaProvider>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          {/*
+           * The blur/tint background lives INSIDE the translating view, not
+           * outside it — so it's part of the card being dragged. If it sat
+           * outside (static, full-screen) while only the header+content
+           * moved, dragging down would reveal the sheet's own background in
+           * the gap instead of the real screen underneath, since that
+           * background never actually moved.
+           */}
+          <Animated.View style={[{ flex: 1 }, dragStyle]}>
+            <GlassSheetBackground>
+              <SafeAreaView className="flex-1" edges={["top", "bottom"]}>
+                <GestureDetector gesture={dragGesture}>
+                  <View>
+                    {/* Grabber handle — also the drag-down-to-close target. */}
+                    <View className="items-center pt-2">
+                      <View
+                        style={{
+                          width: 36,
+                          height: 4.5,
+                          borderRadius: 3,
+                          backgroundColor: palette.border,
+                        }}
+                      />
                     </View>
-                  </GlassView>
-                </View>
-              )}
 
-              <View className="gap-3 pt-5">
-                <Text
-                  className="text-2xl font-outfit-semibold tracking-tight"
-                  style={{ color: palette.text }}
-                >
-                  {pin.name}
-                </Text>
+                    {/* Header */}
+                    <View className="flex-row items-center justify-between px-5 py-3">
+                      <HeaderPill label="Close" color={palette.accent} onPress={onClose} />
+                      {isOwner ? (
+                        <View className="flex-row items-center gap-2">
+                          {onEdit && pin ? (
+                            <IconHeaderButton
+                              icon="edit-2"
+                              color={palette.text}
+                              accessibilityLabel="Edit pin"
+                              disabled={deleting}
+                              onPress={() => onEdit(pin)}
+                            />
+                          ) : null}
+                          <IconHeaderButton
+                            icon="trash-2"
+                            color="#ef4444"
+                            accessibilityLabel="Delete pin"
+                            disabled={deleting}
+                            loading={deleting}
+                            onPress={confirmDelete}
+                          />
+                        </View>
+                      ) : null}
+                    </View>
+                  </View>
+                </GestureDetector>
 
-                {pin.description ? (
-                  <Text
-                    className="text-base leading-6 font-outfit"
-                    style={{ color: palette.textDim }}
-                  >
-                    {pin.description}
-                  </Text>
-                ) : (
-                  <Text
-                    className="text-base italic font-outfit"
-                    style={{ color: palette.textDim }}
-                  >
-                    No description yet.
-                  </Text>
-                )}
+                {pin ? (
+                  <ScrollView className="flex-1" contentContainerClassName="px-5 pb-10 pt-8">
+                    {/* Photos */}
+                    {sortedPhotos.length > 0 ? (
+                      <View
+                        style={{
+                          borderRadius: 20,
+                          overflow: "hidden",
+                          backgroundColor: palette.surface2,
+                        }}
+                      >
+                        <ScrollView
+                          horizontal
+                          pagingEnabled
+                          showsHorizontalScrollIndicator={false}
+                          onMomentumScrollEnd={handlePhotoScrollEnd}
+                        >
+                          {sortedPhotos.map((photo) => (
+                            <PinPhotoFrame key={photo.id} uri={photo.url} />
+                          ))}
+                        </ScrollView>
+                        {sortedPhotos.length > 1 ? (
+                          <View
+                            pointerEvents="none"
+                            className="absolute inset-x-0 bottom-2.5 flex-row items-center justify-center gap-1.5"
+                          >
+                            {sortedPhotos.map((photo, i) => (
+                              <View
+                                key={photo.id}
+                                style={{
+                                  width: i === photoIndex ? 14 : 5.5,
+                                  height: 5.5,
+                                  borderRadius: 3,
+                                  backgroundColor:
+                                    i === photoIndex
+                                      ? "#ffffff"
+                                      : "rgba(255,255,255,0.45)",
+                                }}
+                              />
+                            ))}
+                          </View>
+                        ) : null}
+                      </View>
+                    ) : (
+                      <View style={{ height: 160, borderRadius: 20, overflow: "hidden" }}>
+                        <GlassView radius={20} intensity={20}>
+                          <View className="flex-1 items-center justify-center">
+                            <Feather name="image" size={28} color={palette.textDim} />
+                            <Text
+                              className="mt-2 text-sm font-outfit"
+                              style={{ color: palette.textDim }}
+                            >
+                              No photos
+                            </Text>
+                          </View>
+                        </GlassView>
+                      </View>
+                    )}
 
-                <View className="flex-row items-center gap-1.5 pt-1">
-                  <Feather name="map-pin" size={12} color={palette.textDim} />
-                  <Text
-                    style={{
-                      fontFamily: monoFont,
-                      fontSize: 11,
-                      color: palette.textDim,
-                    }}
-                  >
-                    {pin.latitude.toFixed(5)}, {pin.longitude.toFixed(5)}
-                  </Text>
-                </View>
+                    <View className="gap-3 pt-5">
+                      <Text
+                        className="text-2xl font-outfit-semibold tracking-tight"
+                        style={{ color: palette.text }}
+                      >
+                        {pin.name}
+                      </Text>
 
-                <View className="flex-row items-center gap-1.5">
-                  <Feather name="clock" size={12} color={palette.textDim} />
-                  <Text
-                    style={{
-                      fontFamily: monoFont,
-                      fontSize: 11,
-                      color: palette.textDim,
-                    }}
-                  >
-                    {formatAddedAt(pin.createdAt)}
-                  </Text>
-                </View>
+                      {pin.description ? (
+                        <Text
+                          className="text-base leading-6 font-outfit"
+                          style={{ color: palette.textDim }}
+                        >
+                          {pin.description}
+                        </Text>
+                      ) : (
+                        <Text
+                          className="text-base italic font-outfit"
+                          style={{ color: palette.textDim }}
+                        >
+                          No description yet.
+                        </Text>
+                      )}
 
-                {onShowOnMap ? (
-                  <Pressable
-                    onPress={() => onShowOnMap(pin)}
-                    className="mt-3 flex-row items-center justify-center gap-2 rounded-2xl px-4 py-3.5 active:opacity-80"
-                    style={{ backgroundColor: palette.accent }}
-                  >
-                    <Feather name="navigation" size={16} color={palette.accentFg} />
-                    <Text
-                      className="text-base font-outfit-semibold"
-                      style={{ color: palette.accentFg }}
-                    >
-                      Take me to the pin
-                    </Text>
-                  </Pressable>
+                      <View className="flex-row items-center gap-1.5 pt-1">
+                        <Feather name="map-pin" size={12} color={palette.textDim} />
+                        <Text
+                          style={{
+                            fontFamily: monoFont,
+                            fontSize: 11,
+                            color: palette.textDim,
+                          }}
+                        >
+                          {pin.latitude.toFixed(5)}, {pin.longitude.toFixed(5)}
+                        </Text>
+                      </View>
+
+                      <View className="flex-row items-center gap-1.5">
+                        <Feather name="clock" size={12} color={palette.textDim} />
+                        <Text
+                          style={{
+                            fontFamily: monoFont,
+                            fontSize: 11,
+                            color: palette.textDim,
+                          }}
+                        >
+                          {formatAddedAt(pin.createdAt)}
+                        </Text>
+                      </View>
+
+                      {onShowOnMap ? (
+                        <Pressable
+                          onPress={() => {
+                            haptics.tap();
+                            onShowOnMap(pin);
+                          }}
+                          className="mt-3 flex-row items-center justify-center gap-2 rounded-2xl px-4 py-3.5 active:opacity-80"
+                          style={{ backgroundColor: palette.accent }}
+                        >
+                          <Feather name="navigation" size={16} color={palette.accentFg} />
+                          <Text
+                            className="text-base font-outfit-semibold"
+                            style={{ color: palette.accentFg }}
+                          >
+                            Take me to the pin
+                          </Text>
+                        </Pressable>
+                      ) : null}
+                    </View>
+                  </ScrollView>
                 ) : null}
-              </View>
-            </ScrollView>
-          ) : null}
-        </SafeAreaView>
-      </ScreenBackground>
+              </SafeAreaView>
+            </GlassSheetBackground>
+          </Animated.View>
+        </GestureHandlerRootView>
+      </SafeAreaProvider>
     </Modal>
   );
 }

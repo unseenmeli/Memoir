@@ -14,11 +14,15 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import Animated from "react-native-reanimated";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
+import { GlassSheetBackground } from "@/components/GlassSheetBackground";
 import { GlassView } from "@/components/GlassView";
 import { HeaderPill, nextPhotoIndex, type PinRecord } from "@/components/PinDetails";
-import { ScreenBackground } from "@/components/ScreenBackground";
 import { db } from "@/lib/db";
+import { useDragToDismiss } from "@/lib/dragToDismiss";
+import { haptics } from "@/lib/haptics";
 import { createPin, MAX_PINS_PER_USER, updatePin } from "@/lib/pins";
 import { getPalette } from "@/lib/palette";
 import {
@@ -111,10 +115,15 @@ export function PinComposer({
   const atLimit = !isEditing && pinCount >= MAX_PINS_PER_USER;
   // Name is the only required field — everything else can be added later.
   const canSave = name.trim().length > 0 && !saving && !atLimit;
+  const { gesture: dragGesture, style: dragStyle, reset: resetDrag } =
+    useDragToDismiss(handleClose, !saving);
 
   // The tag vocabulary already in use, for autocomplete. Queried here rather
-  // than passed down so the composer works wherever it's mounted.
-  const { data: tagData } = db.useQuery({ pins: {} });
+  // than passed down so the composer works wherever it's mounted. Scoped to
+  // this user because pins are private — "my labels", not everyone's.
+  const { data: tagData } = db.useQuery({
+    pins: { $: { where: { "owner.id": userId } } },
+  });
   const allTags = useMemo(
     () => collectTags((tagData?.pins ?? []) as { tags?: unknown }[]),
     [tagData],
@@ -140,6 +149,7 @@ export function PinComposer({
     setNewPhotos([]);
     setSaving(false);
     setError("");
+    resetDrag();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [visible, editingPin?.id]);
 
@@ -166,16 +176,19 @@ export function PinComposer({
     });
 
     if (!result.canceled) {
+      haptics.selection();
       setNewPhotos((prev) => [...prev, ...result.assets]);
     }
   }
 
   function removeExistingPhoto(photoId: string) {
+    haptics.selection();
     setExistingPhotos((prev) => prev.filter((p) => p.id !== photoId));
     setRemovedPhotoIds((prev) => [...prev, photoId]);
   }
 
   function removeNewPhoto(uri: string) {
+    haptics.selection();
     setNewPhotos((prev) => prev.filter((p) => p.uri !== uri));
   }
 
@@ -184,10 +197,12 @@ export function PinComposer({
     const next = normalizeTag(raw ?? tagDraft);
     setTagDraft("");
     if (!next || tags.includes(next) || tags.length >= MAX_TAGS_PER_PIN) return;
+    haptics.selection();
     setTags((prev) => [...prev, next]);
   }
 
   function removeTag(tag: string) {
+    haptics.selection();
     setTags((prev) => prev.filter((t) => t !== tag));
   }
 
@@ -197,10 +212,14 @@ export function PinComposer({
 
     const trimmedName = name.trim();
     if (!trimmedName) {
+      // Nothing was attempted — the sheet is refusing to start. `warning`
+      // rather than `error` keeps that distinction audible in the hand.
+      haptics.warning();
       setError("Give this place a name.");
       return;
     }
     if (atLimit) {
+      haptics.warning();
       setError(`You've reached the limit of ${MAX_PINS_PER_USER} pins.`);
       return;
     }
@@ -213,7 +232,7 @@ export function PinComposer({
     setError("");
     try {
       if (editingPin) {
-        await updatePin(editingPin.id, {
+        await updatePin(userId, editingPin.id, {
           name: trimmedName,
           description,
           tags: finalTags,
@@ -231,8 +250,12 @@ export function PinComposer({
           photos: newPhotos,
         });
       }
+      // Photo uploads make saving genuinely slow, so the finish is worth
+      // confirming — by then people are usually looking at something else.
+      haptics.success();
       onSaved();
     } catch (err) {
+      haptics.error();
       setError(
         (err as Error)?.message ?? "Could not save the pin. Try again.",
       );
@@ -244,65 +267,88 @@ export function PinComposer({
     <Modal
       visible={visible}
       animationType="slide"
-      presentationStyle="pageSheet"
+      // `pageSheet` rendered as an opaque native card with no way to show
+      // the map behind it, so the glass background had nothing to blur —
+      // just its own flat tint. `overFullScreen` + `transparent` keeps the
+      // map in the view hierarchy behind the sheet, same as the pin details
+      // and settings sheets, so the blur actually has something real to show
+      // through. This also means iOS loses the free swipe-to-dismiss
+      // `pageSheet` gave it, which is why the drag gesture below is now
+      // unconditional instead of Android-only.
+      presentationStyle="overFullScreen"
+      transparent
+      statusBarTranslucent
       onRequestClose={handleClose}
     >
-      <ScreenBackground>
-        <SafeAreaView className="flex-1" edges={["top", "bottom"]}>
-          {/* Grabber + header live OUTSIDE the keyboard avoider on purpose.
-              Inside it, opening the keyboard pushed the whole header — Cancel
-              and Save included — up off the top of the sheet. Only the
-              scrolling content should move when the keyboard appears. */}
-          <View>
-            {/* Grabber handle — matches the other sheets' chrome. */}
-            <View className="items-center pt-2">
-              <View
-                style={{
-                  width: 36,
-                  height: 4.5,
-                  borderRadius: 3,
-                  backgroundColor: palette.border,
-                }}
-              />
-            </View>
+      <SafeAreaProvider>
+        <GestureHandlerRootView style={{ flex: 1 }}>
+          {/*
+           * The blur/tint background lives INSIDE the translating view, not
+           * outside it — so it's part of the card being dragged. If it sat
+           * outside (static, full-screen) while only the header+content
+           * moved, dragging down would reveal the sheet's own background in
+           * the gap instead of the real screen underneath, since that
+           * background never actually moved.
+           */}
+          <Animated.View style={[{ flex: 1 }, dragStyle]}>
+            <GlassSheetBackground>
+              <SafeAreaView className="flex-1" edges={["top", "bottom"]}>
+                {/* Grabber + header live OUTSIDE the keyboard avoider on purpose.
+                    Inside it, opening the keyboard pushed the whole header — Cancel
+                    and Save included — up off the top of the sheet. Only the
+                    scrolling content should move when the keyboard appears. */}
+                <GestureDetector gesture={dragGesture}>
+                <View>
+                  {/* Grabber handle — also the drag-down-to-close target. */}
+                  <View className="items-center pt-2">
+                    <View
+                      style={{
+                        width: 36,
+                        height: 4.5,
+                        borderRadius: 3,
+                        backgroundColor: palette.border,
+                      }}
+                    />
+                  </View>
 
-            {/* Header */}
-            <View className="flex-row items-center justify-between px-5 py-3">
-              <HeaderPill
-                label="Cancel"
-                color={palette.textDim}
-                onPress={handleClose}
-              />
-              <Text
-                className="flex-1 text-center text-base font-outfit-semibold"
-                style={{ color: palette.text }}
+                  {/* Header */}
+                  <View className="flex-row items-center justify-between px-5 py-3">
+                    <HeaderPill
+                      label="Cancel"
+                      color={palette.textDim}
+                      onPress={handleClose}
+                    />
+                    <Text
+                      className="flex-1 text-center text-base font-outfit-semibold"
+                      style={{ color: palette.text }}
+                    >
+                      {isEditing ? "Edit place" : "New place"}
+                    </Text>
+                    <HeaderPill
+                      label="Save"
+                      // Filled and high-contrast once there's actually something to
+                      // save; plain glass while the form is still incomplete, so the
+                      // button's state says whether you can proceed.
+                      color={canSave ? palette.accentFg : palette.textDim}
+                      fill={canSave ? palette.accent : undefined}
+                      disabled={!canSave}
+                      loading={saving}
+                      onPress={handleSave}
+                    />
+                  </View>
+                </View>
+              </GestureDetector>
+
+              <KeyboardAvoidingView
+                className="flex-1"
+                behavior={Platform.OS === "ios" ? "padding" : undefined}
               >
-                {isEditing ? "Edit place" : "New place"}
-              </Text>
-              <HeaderPill
-                label="Save"
-                // Filled and high-contrast once there's actually something to
-                // save; plain glass while the form is still incomplete, so the
-                // button's state says whether you can proceed.
-                color={canSave ? palette.accentFg : palette.textDim}
-                fill={canSave ? palette.accent : undefined}
-                disabled={!canSave}
-                loading={saving}
-                onPress={handleSave}
-              />
-            </View>
-          </View>
-
-          <KeyboardAvoidingView
-            className="flex-1"
-            behavior={Platform.OS === "ios" ? "padding" : undefined}
-          >
-            <ScrollView
-              className="flex-1 px-5"
-              contentContainerClassName="gap-5 pb-8 pt-2"
-              keyboardShouldPersistTaps="handled"
-              keyboardDismissMode="interactive"
-            >
+                <ScrollView
+                  className="flex-1 px-5"
+                  contentContainerClassName="gap-5 pb-8 pt-2"
+                  keyboardShouldPersistTaps="handled"
+                  keyboardDismissMode="interactive"
+                >
               {atLimit ? (
                 <View className="rounded-xl bg-amber-50 px-4 py-3 dark:bg-amber-950/40">
                   <Text className="text-sm text-amber-700 font-outfit dark:text-amber-300">
@@ -555,13 +601,16 @@ export function PinComposer({
                 ) : null}
               </View>
 
-              {error ? (
-                <Text className="text-sm font-outfit text-red-500">{error}</Text>
-              ) : null}
-            </ScrollView>
-          </KeyboardAvoidingView>
-        </SafeAreaView>
-      </ScreenBackground>
+                  {error ? (
+                    <Text className="text-sm font-outfit text-red-500">{error}</Text>
+                  ) : null}
+                </ScrollView>
+              </KeyboardAvoidingView>
+              </SafeAreaView>
+            </GlassSheetBackground>
+          </Animated.View>
+        </GestureHandlerRootView>
+      </SafeAreaProvider>
     </Modal>
   );
 }

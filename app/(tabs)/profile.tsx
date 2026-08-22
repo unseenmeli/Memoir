@@ -3,7 +3,7 @@ import type { User } from "@instantdb/react-native";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
@@ -21,11 +21,13 @@ import { PinComposer } from "@/components/PinComposer";
 import { PinDetails, sortPhotos, type PinRecord } from "@/components/PinDetails";
 import { ScreenBackground } from "@/components/ScreenBackground";
 import { db } from "@/lib/db";
+import { haptics } from "@/lib/haptics";
 import { useBootBlocker } from "@/lib/loading";
 import { useRefresh } from "@/lib/refresh";
 import { useMapFocus } from "@/lib/mapFocus";
-import { getPalette, mix, monoFont } from "@/lib/palette";
+import { getPalette, mix, monoFont, withAlpha } from "@/lib/palette";
 import { ensureProfile, updateAvatar, type ProfileRecord } from "@/lib/profile";
+import { collectTags } from "@/lib/tags";
 import { useTabBarHeight } from "@/lib/tabBar";
 import { useTheme } from "@/lib/theme";
 
@@ -176,6 +178,16 @@ function ProfileContent({ user }: { user: User }) {
   const pins = (data?.pins ?? []) as unknown as PinRecord[];
   const pinCount = pins.length;
   const email = user.email ?? "";
+  const isGuest = !email;
+
+  // Both derived from pins already in hand, so they move as the collage does.
+  // `country` is optional on older pins (see instant.schema.ts), so this can
+  // undercount slightly — the label stays true either way.
+  const countryCount = useMemo(
+    () => new Set(pins.map((pin) => pin.country).filter(Boolean)).size,
+    [pins],
+  );
+  const tagCount = useMemo(() => collectTags(pins).length, [pins]);
 
   // Create the profile row the first time we see a signed-in user without one.
   useEffect(() => {
@@ -206,8 +218,10 @@ function ProfileContent({ user }: { user: User }) {
 
     setUploading(true);
     try {
-      await updateAvatar(profile.id, result.assets[0], profile.avatar?.id);
+      await updateAvatar(user.id, profile.id, result.assets[0], profile.avatar?.id);
+      haptics.success();
     } catch (err) {
+      haptics.error();
       Alert.alert("Couldn't update photo", (err as Error)?.message ?? "Try again.");
     } finally {
       setUploading(false);
@@ -225,7 +239,10 @@ function ProfileContent({ user }: { user: User }) {
     router.navigate("/");
   }
 
-  const displayName = profile?.displayName ?? email.split("@")[0] ?? "explorer";
+  // `||`, not `??`: a guest has no email, so `"".split("@")[0]` is `""` — which
+  // is not nullish, so `??` would hand the header an empty name.
+  const displayName =
+    profile?.displayName || (email ? email.split("@")[0] : "Guest");
   const initial = displayName.charAt(0).toUpperCase();
 
   const heroGradient: [string, string, string] = [
@@ -367,20 +384,20 @@ function ProfileContent({ user }: { user: User }) {
 
             <View className="flex-1 gap-2.5">
               <Stat
-                label="Connections"
-                value="0"
-                fg={palette.heroFg}
-                fgDim={palette.heroFgDim}
-              />
-              <Stat
                 label="Pins"
                 value={String(pinCount)}
                 fg={palette.heroFg}
                 fgDim={palette.heroFgDim}
               />
               <Stat
-                label="Streak"
-                value="0"
+                label={countryCount === 1 ? "Country" : "Countries"}
+                value={String(countryCount)}
+                fg={palette.heroFg}
+                fgDim={palette.heroFgDim}
+              />
+              <Stat
+                label={tagCount === 1 ? "Tag" : "Tags"}
+                value={String(tagCount)}
                 fg={palette.heroFg}
                 fgDim={palette.heroFgDim}
               />
@@ -388,6 +405,33 @@ function ProfileContent({ user }: { user: User }) {
           </View>
         </View>
       </View>
+
+      {/* A guest session lives only on this device and only until they sign
+          out, so the way to keep it needs to be visible from the main screen —
+          not buried behind the settings gear. */}
+      {isGuest ? (
+        <Pressable
+          onPress={() => router.push("/settings")}
+          accessibilityRole="button"
+          accessibilityLabel="Add an email to keep your pins"
+          className="mb-5 flex-row items-center gap-3 rounded-2xl px-4 py-3 active:opacity-70"
+          style={{
+            borderWidth: 1,
+            borderColor: withAlpha(palette.accent, 0.5),
+            backgroundColor: withAlpha(palette.accent, 0.1),
+          }}
+        >
+          <Feather name="alert-circle" size={17} color={palette.accent} />
+          <Text
+            className="flex-1 text-sm font-outfit"
+            style={{ color: palette.text }}
+          >
+            You&apos;re browsing as a guest. Add an email so you don&apos;t lose
+            these pins.
+          </Text>
+          <Feather name="chevron-right" size={17} color={palette.textDim} />
+        </Pressable>
+      ) : null}
 
       {/* Collage heading */}
       <View className="flex-row items-baseline justify-between">

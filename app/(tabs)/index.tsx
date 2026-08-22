@@ -1,15 +1,23 @@
-import { Feather } from "@expo/vector-icons";
 import { useCallback, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AuthGate } from "@/components/AuthGate";
-import { GlassView } from "@/components/GlassView";
 import { Map } from "@/components/Map";
 import { TurbineLogo } from "@/components/TurbineLogo";
 import { useBootBlocker } from "@/lib/loading";
 import { HEADER_HEIGHT, HINT_HEIGHT } from "@/lib/mapRegion";
 import { getPalette, mix } from "@/lib/palette";
 import { useTheme } from "@/lib/theme";
+
+/**
+ * How far the logo sits above where the header block would otherwise start.
+ *
+ * The header is a fixed-height box with the logo centred in it, so the lift is
+ * applied to the box rather than the logo — nudging the box keeps the logo's
+ * own alignment intact. Sized to stay clear of the hint line above it: the
+ * logo's top edge still lands below the hint band, so the two never collide.
+ */
+const LOGO_LIFT = 18;
 
 export default function HomeScreen() {
   const insets = useSafeAreaInsets();
@@ -39,33 +47,11 @@ export default function HomeScreen() {
             pointerEvents="box-none"
             style={[
               styles.header,
-              { top: insets.top + HINT_HEIGHT, height: HEADER_HEIGHT },
+              { top: insets.top + HINT_HEIGHT - LOGO_LIFT, height: HEADER_HEIGHT },
             ]}
           >
-            <View className="flex-1 flex-row items-center justify-between px-5">
+            <View className="flex-1 flex-row items-center px-5">
               <TurbineLogo size={32} />
-
-              {/* Decorative only — this app has no notification system yet. */}
-              <GlassView
-                radius={20}
-                intensity={30}
-                style={{ width: 40, height: 40 }}
-              >
-                <View className="flex-1 items-center justify-center">
-                  <Feather name="bell" size={17} color={palette.text} />
-                  <View
-                    style={{
-                      position: "absolute",
-                      top: 8,
-                      right: 9,
-                      width: 6,
-                      height: 6,
-                      borderRadius: 3,
-                      backgroundColor: palette.accent,
-                    }}
-                  />
-                </View>
-              </GlassView>
             </View>
           </View>
 

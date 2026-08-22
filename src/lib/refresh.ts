@@ -1,5 +1,6 @@
 import { useCallback, useRef, useState } from "react";
 import { db } from "./db";
+import { haptics } from "./haptics";
 
 /**
  * Pull-to-refresh for Instant-backed lists.
@@ -43,6 +44,9 @@ export function useRefresh(): {
   const onRefresh = useCallback(() => {
     if (busy.current) return;
     busy.current = true;
+    // The pull crossing its threshold is the moment the gesture commits —
+    // same tick every list in iOS gives you there.
+    haptics.tap();
     setRefreshing(true);
 
     (async () => {
