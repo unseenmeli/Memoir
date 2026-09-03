@@ -1,0 +1,16 @@
+diff --git a/node_modules/react-native-maps/ios/AirMaps/AIRMapMarker.m b/node_modules/react-native-maps/ios/AirMaps/AIRMapMarker.m
+index 8c17ac7..6f59c67 100644
+--- a/node_modules/react-native-maps/ios/AirMaps/AIRMapMarker.m
++++ b/node_modules/react-native-maps/ios/AirMaps/AIRMapMarker.m
+@@ -289,7 +289,10 @@ NSInteger const AIR_CALLOUT_OPEN_ZINDEX_BASELINE = 999;
+     _calloutIsOpen = NO;
+     [self setZIndex:_zIndexBeforeOpen];
+     // hide the callout view
+-    [self.map.calloutView dismissCalloutAnimated:YES];
++    // Patched (see patches/): the animated dismiss runs a 0.23s bounce before
++    // removing the view, so a pin's label lingered well after the tap that
++    // deselected it. Nothing about selection changes -- only the hide timing.
++    [self.map.calloutView dismissCalloutAnimated:NO];
+ 
+     [self setSelected:NO animated:NO];
+     [self.map deselectAnnotation:self animated:NO];

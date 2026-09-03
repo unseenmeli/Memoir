@@ -33,6 +33,9 @@ yarn-error.*
 # local env files
 .env*.local
 
+# built privacy-policy page (see .github/workflows/privacy-policy.yml)
+_site/
+
 # typescript
 *.tsbuildinfo
 
@@ -40,6 +43,16 @@ yarn-error.*
 /ios
 /android
 
+# Supabase CLI local state: which project this checkout is linked to, plus
+# cached server versions. Machine-local, and it changes per developer.
+supabase/.temp/
+supabase/.branches/
+
 # env files
 .env*
 !.env.example
+
+# editor swap files
+*.swp
+*.swo
+*.swn

@@ -1,6 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import type { User } from "@instantdb/react-native";
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import MapView, {
   Callout,
@@ -9,16 +8,22 @@ import MapView, {
 } from "react-native-maps";
 import Animated, { FadeInDown, FadeOutDown } from "react-native-reanimated";
 import { GlassView } from "@/components/GlassView";
-import { db } from "@/lib/db";
+import type { User } from "@/lib/auth";
+import { usePins } from "@/lib/data";
+import { haptics } from "@/lib/haptics";
 import { PinComposer } from "@/components/PinComposer";
-import { PinDetails, type PinRecord } from "@/components/PinDetails";
+import { PinDetails, sortPhotos, type PinRecord } from "@/components/PinDetails";
+import { useViewerLocation } from "@/lib/distance";
 import { useMapFocus } from "@/lib/mapFocus";
+import { usePrefetchPhotos } from "@/lib/photoPrefetch";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import {
   HEADER_HEIGHT,
   HINT_HEIGHT,
+  PLACEMENT_DELTA,
   getLastRegion,
   placementRegion,
+  regionForCoords,
   setLastRegion,
   zoomedRegion,
 } from "@/lib/mapRegion";
@@ -179,7 +184,6 @@ export function Map({
   const markerRefs = useRef<Record<string, InstanceType<typeof Marker> | null>>(
     {}
   );
-
   // Two-step placement: `pending` is the provisional marker the user is
   // looking at after a long-press; `draft` only gets set once they confirm,
   // which is what actually opens the composer.
@@ -191,10 +195,17 @@ export function Map({
   // Only the second one means there's a map to look at.
   const [mapReady, setMapReady] = useState(false);
   const [tilesLoaded, setTilesLoaded] = useState(false);
+  // The opening shot happens once; after that the camera belongs to the user.
+  const didFrame = useRef(false);
+  const viewerLocation = useViewerLocation();
+  // Read through a ref so the opening-shot effect below can see the pins
+  // without re-running every time the list identity changes.
+  const pinsRef = useRef<PinRecord[]>([]);
 
-  const { data, isLoading } = db.useQuery({
-    pins: { photos: {}, owner: {} },
-  });
+  // Only the viewer's own pins — pins are private, and row level security is
+  // what enforces that (see the policies in supabase/migrations). This query
+  // is shared with every other screen asking the same thing.
+  const { pins, isLoading } = usePins(user.id);
 
   // `onMapLoaded` is the real "tiles are painted" signal, but it only fires on
   // Google-backed maps — on Apple Maps it may never arrive. So once the view
@@ -211,6 +222,36 @@ export function Map({
   useEffect(() => {
     if (ready) onReady?.();
   }, [ready, onReady]);
+
+  // The opening shot, once per mount. `INITIAL_REGION` is a fixed city, which
+  // is the right guess for nobody — so frame the user's own pins instead, and
+  // fall back to where they physically are if they haven't made any yet.
+  // Skipped entirely when a "take me to the pin" target is pending, which owns
+  // the camera in that case.
+  useEffect(() => {
+    if (!ready || !mapReady || didFrame.current || target) return;
+
+    const fitted = regionForCoords(
+      pinsRef.current.map((pin) => ({
+        latitude: pin.latitude,
+        longitude: pin.longitude,
+      })),
+    );
+    const destination =
+      fitted ??
+      (viewerLocation
+        ? {
+            ...viewerLocation,
+            latitudeDelta: PLACEMENT_DELTA,
+            longitudeDelta: PLACEMENT_DELTA,
+          }
+        : null);
+    if (!destination) return;
+
+    didFrame.current = true;
+    mapRef.current?.animateToRegion(destination, PLACEMENT_ANIM_MS);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [ready, mapReady, viewerLocation, target]);
 
   // "Take me to the pin": once the map is ready, pan in tight and open the
   // pin's label. Gated on `mapReady` so it also works on the map's first mount.
@@ -239,8 +280,21 @@ export function Map({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target?.ts, mapReady]);
 
-  const pins = (data?.pins ?? []) as unknown as PinRecord[];
-  const myPinCount = pins.filter((p) => p.owner?.id === user.id).length;
+  pinsRef.current = pins;
+
+  // Warm the cache for the photo each pin opens on, so tapping a label paints
+  // the sheet from memory. Unlike the Find and Profile tabs, nothing on the
+  // map has requested these yet.
+  const firstPhotoUrls = useMemo(
+    () =>
+      pins
+        .map((pin) => sortPhotos(pin.photos)[0]?.url)
+        .filter((url): url is string => !!url),
+    [pins],
+  );
+  usePrefetchPhotos(firstPhotoUrls);
+  // The query is already scoped to this user, so every pin here is theirs.
+  const myPinCount = pins.length;
 
   if (Platform.OS === "web") {
     return (
@@ -254,6 +308,10 @@ export function Map({
 
   function handleLongPress(event: LongPressEvent) {
     const coordinate = event.nativeEvent.coordinate;
+    // The one moment in the app where something happens under a finger that's
+    // already pressing and holding still — without a tick there's nothing to
+    // tell you the hold "took" except looking away from your own thumb.
+    haptics.longPress();
     setPending(coordinate);
     // Frame the spot before asking anything — see the place, then decide.
     mapRef.current?.animateToRegion(
@@ -273,6 +331,7 @@ export function Map({
 
   function confirmPending() {
     if (!pending) return;
+    haptics.tap();
     setDraft(pending);
     setPending(null);
   }
@@ -304,12 +363,26 @@ export function Map({
                 our own label. Tapping the label opens the pin's details. */}
             <Callout tooltip onPress={() => setSelected(pin)}>
               <View style={styles.calloutWrap}>
-                <View style={styles.labelPill}>
-                  <Text style={styles.labelText} numberOfLines={1}>
-                    {pin.name}
-                  </Text>
+                {/* The shadow sits on a wrapper rather than on GlassView
+                    itself, which clips its own bounds to round the corners. */}
+                <View style={styles.labelShadow}>
+                  <GlassView radius={999} intensity={45} style={styles.labelPill}>
+                    <View style={styles.labelInner}>
+                      <Text
+                        style={[styles.labelText, { color: palette.text }]}
+                        numberOfLines={1}
+                      >
+                        {pin.name}
+                      </Text>
+                    </View>
+                  </GlassView>
                 </View>
-                <View style={styles.caret} />
+                {/* Tinted to the glass edge rather than a solid fill — an
+                    opaque triangle under a frosted pill reads as two
+                    different materials. */}
+                <View
+                  style={[styles.caret, { borderTopColor: palette.glassBorder }]}
+                />
               </View>
             </Callout>
           </Marker>
@@ -451,28 +524,35 @@ const styles = StyleSheet.create({
   calloutWrap: {
     alignItems: "center",
   },
-  // Floating dark "glass" pill instead of a speech bubble.
-  labelPill: {
-    maxWidth: 240,
-    paddingHorizontal: 15,
-    paddingVertical: 8,
+  // Liquid glass, the same material as the tab bar and header buttons, so a
+  // selected pin's label reads as part of the app's chrome rather than a
+  // separate map widget. GlassView blurs whatever is behind it — here, the
+  // map itself.
+  labelShadow: {
     borderRadius: 999,
-    backgroundColor: "rgba(24,24,27,0.94)",
-    borderWidth: 1,
-    borderColor: "rgba(255,255,255,0.1)",
     shadowColor: "#000",
-    shadowOpacity: 0.3,
+    shadowOpacity: 0.25,
     shadowRadius: 10,
     shadowOffset: { width: 0, height: 4 },
     elevation: 6,
   },
+  labelPill: {
+    maxWidth: 240,
+  },
+  // Padding lives on an inner view: GlassView positions its blur and tint
+  // layers with absoluteFill, so the size has to come from a real child.
+  labelInner: {
+    paddingHorizontal: 15,
+    paddingVertical: 8,
+  },
   labelText: {
-    color: "#ffffff",
     fontFamily: "Outfit_600SemiBold",
     fontSize: 14,
     letterSpacing: 0.2,
   },
-  // Small pointer toward the pin — same color as the pill, no bubble outline.
+  // Small pointer toward the pin. The fill is set inline from the palette's
+  // glass edge so it tracks the theme; a border triangle can't be blurred, so
+  // matching the pill's edge is the closest it gets to the same material.
   caret: {
     width: 0,
     height: 0,
@@ -482,6 +562,5 @@ const styles = StyleSheet.create({
     borderTopWidth: 7,
     borderLeftColor: "transparent",
     borderRightColor: "transparent",
-    borderTopColor: "rgba(24,24,27,0.94)",
   },
 });

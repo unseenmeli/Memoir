@@ -1,5 +1,4 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
-import type { User } from "@instantdb/react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
@@ -29,7 +28,8 @@ import { GlassView } from "@/components/GlassView";
 import { PinComposer } from "@/components/PinComposer";
 import { PinDetails, sortPhotos, type PinRecord } from "@/components/PinDetails";
 import { ScreenBackground } from "@/components/ScreenBackground";
-import { db } from "@/lib/db";
+import type { User } from "@/lib/auth";
+import { usePins } from "@/lib/data";
 import {
   distanceKm,
   formatDistance,
@@ -37,6 +37,7 @@ import {
   useViewerLocation,
   PROXIMITY_LABEL,
 } from "@/lib/distance";
+import { haptics } from "@/lib/haptics";
 import { useBootBlocker } from "@/lib/loading";
 import { useRefresh } from "@/lib/refresh";
 import { useMapFocus } from "@/lib/mapFocus";
@@ -53,23 +54,26 @@ import { useTabBarHeight } from "@/lib/tabBar";
 import { useTheme } from "@/lib/theme";
 
 /**
- * The three view filters. Each is a toggle: tapping the active one turns it
- * off and returns to the unfiltered list, so there's always a way back.
+ * How the pin list is ordered. Exactly one is always active — unlike the old
+ * filter row, where tapping the active chip turned everything off and left you
+ * staring at an empty list with no obvious way back.
  */
-const FILTERS = [
-  { key: "trending", icon: "trending-up", label: "Trending" },
-  { key: "saved", icon: "bookmark", label: "Saved" },
-  { key: "friends", icon: "users", label: "Friends" },
+const SORTS = [
+  { key: "recent", icon: "clock", label: "Recent" },
+  { key: "nearest", icon: "navigation", label: "Nearest" },
 ] as const;
 
-type FilterKey = (typeof FILTERS)[number]["key"];
+type SortKey = (typeof SORTS)[number]["key"];
 
-function FilterToggle({
+// ODbL requires attribution wherever OpenStreetMap data is displayed.
+const PLACES_LABEL = "Places · © OpenStreetMap contributors";
+
+function SortToggle({
   filter,
   active,
   onPress,
 }: {
-  filter: (typeof FILTERS)[number];
+  filter: (typeof SORTS)[number];
   active: boolean;
   onPress: () => void;
 }) {
@@ -410,13 +414,14 @@ function EmptyState({ icon, title, body }: {
   );
 }
 
-/** Picks the right empty message for the current query + filter combination. */
+/** Picks the right empty message for the current query + tag combination. */
 function FindEmptyState({
   query,
-  filter,
+  hasTags,
 }: {
   query: string;
-  filter: FilterKey | null;
+  /** Whether any tag chips are selected — changes what "empty" means. */
+  hasTags: boolean;
 }) {
   if (query) {
     return (
@@ -428,41 +433,23 @@ function FindEmptyState({
     );
   }
 
-  // Saved and Friends have no backing data yet — say so plainly rather than
-  // showing an empty list that looks like a bug.
-  if (filter === "saved") {
+  if (hasTags) {
     return (
       <EmptyState
-        icon="bookmark-outline"
-        title="No saved places yet"
-        body="Saving pins isn't wired up yet — it needs a saves table in the schema."
-      />
-    );
-  }
-  if (filter === "friends") {
-    return (
-      <EmptyState
-        icon="people-outline"
-        title="No friends yet"
-        body="Friends aren't wired up yet — it needs a connections table in the schema."
-      />
-    );
-  }
-  if (filter === "trending") {
-    return (
-      <EmptyState
-        icon="trending-up-outline"
-        title="Nothing trending yet"
-        body="Once people start dropping pins, the newest ones show up here."
+        icon="pricetag-outline"
+        title="No pins with those tags"
+        body="Try removing a tag, or add these labels to a pin while editing it."
       />
     );
   }
 
+  // Nothing saved yet — same wording as the profile collage, so the app gives
+  // one consistent answer to "how do I start?".
   return (
     <EmptyState
-      icon="compass-outline"
-      title="Search saved places"
-      body="Search by name, description or tag. Closest places show up first."
+      icon="map-outline"
+      title="No pins yet"
+      body="Long-press anywhere on the map to drop your first one."
     />
   );
 }
@@ -476,17 +463,19 @@ function FindContent({ user }: { user: User }) {
   const [searchFocused, setSearchFocused] = useState(false);
   const [selected, setSelected] = useState<PinRecord | null>(null);
   const [editing, setEditing] = useState<PinRecord | null>(null);
-  // At most one filter at a time; null means "no filter". Trending is on by
-  // default so the page opens with content instead of an empty prompt.
-  const [active, setActive] = useState<FilterKey | null>("trending");
+  // Newest-first by default: it's the ordering that makes sense before the
+  // location permission has resolved (and if it never does).
+  const [sort, setSort] = useState<SortKey>("recent");
   // Tag chips are additive: a pin must carry every selected tag.
   const [selectedTags, setSelectedTags] = useState<string[]>([]);
 
-  function toggleFilter(key: FilterKey) {
-    setActive((current) => (current === key ? null : key));
+  function chooseSort(key: SortKey) {
+    haptics.selection();
+    setSort(key);
   }
 
   function toggleTag(tag: string) {
+    haptics.selection();
     setSelectedTags((current) =>
       current.includes(tag)
         ? current.filter((t) => t !== tag)
@@ -498,21 +487,15 @@ function FindContent({ user }: { user: User }) {
   const viewerLocation = useViewerLocation();
   const { refreshing, onRefresh } = useRefresh();
 
-  const { data, isLoading } = db.useQuery({
-    pins: { photos: {}, owner: {} },
-  });
+  // Only the viewer's own pins — pins are private, and row level security is
+  // what enforces that (see the policies in supabase/migrations). This query
+  // is shared with every other screen asking the same thing.
+  const { pins, isLoading } = usePins(user.id);
 
   useBootBlocker("find", isLoading);
 
-  const pins = useMemo(
-    () => (data?.pins ?? []) as unknown as PinRecord[],
-    [data],
-  );
-
-  const myPinCount = useMemo(
-    () => pins.filter((p) => p.owner?.id === user.id).length,
-    [pins, user.id],
-  );
+  // The query is already scoped to this user, so every pin here is theirs.
+  const myPinCount = pins.length;
 
   const trimmed = query.trim();
 
@@ -536,7 +519,8 @@ function FindContent({ user }: { user: User }) {
     viewerCountry,
   );
 
-  // With no query, an active filter browses the list instead of searching.
+  // With no query, this is the browse list: every pin the user owns, filtered
+  // by any selected tags and ordered by the active sort.
   const browse = useMemo(() => {
     const tagged = selectedTags.length
       ? pins.filter((pin) => {
@@ -545,13 +529,10 @@ function FindContent({ user }: { user: User }) {
         })
       : pins;
 
-    // Tag chips alone are a browse, even with no view filter selected.
-    if (active !== "trending") {
-      return selectedTags.length ? sortByDistance(tagged, viewerLocation) : [];
-    }
-    // Trending = newest first; that's the whole point of the filter.
-    return [...tagged].sort((a, b) => b.createdAt - a.createdAt);
-  }, [active, pins, selectedTags, viewerLocation]);
+    return sort === "nearest"
+      ? sortByDistance(tagged, viewerLocation)
+      : [...tagged].sort((a, b) => b.createdAt - a.createdAt);
+  }, [sort, pins, selectedTags, viewerLocation]);
 
   // Rows shown in the list: plain saved pins while browsing, or saved pins +
   // live places while searching — each in its own labeled group when both
@@ -579,13 +560,22 @@ function FindContent({ user }: { user: User }) {
 
     if (pinRows.length && placeRows.length) {
       return [
-        { kind: "header", key: "h-pins", label: "Saved pins" },
+        { kind: "header", key: "h-pins", label: "Your pins" },
         ...pinRows,
-        { kind: "header", key: "h-places", label: "Places · OpenStreetMap" },
+        { kind: "header", key: "h-places", label: PLACES_LABEL },
         ...placeRows,
       ];
     }
-    return [...pinRows, ...placeRows];
+    // Attribution is required wherever OSM data is shown, so a places-only
+    // result set still gets its header — it used to fall through to a bare,
+    // unattributed list.
+    if (placeRows.length) {
+      return [
+        { kind: "header", key: "h-places", label: PLACES_LABEL },
+        ...placeRows,
+      ];
+    }
+    return pinRows;
   }, [trimmed, browse, results, places]);
 
   function goToPinOnMap(pin: PinRecord) {
@@ -625,12 +615,12 @@ function FindContent({ user }: { user: User }) {
         <View className="px-6 pt-4">
           {/* Filter row — centered now that there's no title beside it. */}
           <View className="flex-row items-center justify-center gap-1.5">
-            {FILTERS.map((filter) => (
-              <FilterToggle
-                key={filter.key}
-                filter={filter}
-                active={active === filter.key}
-                onPress={() => toggleFilter(filter.key)}
+            {SORTS.map((option) => (
+              <SortToggle
+                key={option.key}
+                filter={option}
+                active={sort === option.key}
+                onPress={() => chooseSort(option.key)}
               />
             ))}
           </View>
@@ -763,12 +753,12 @@ function FindContent({ user }: { user: User }) {
               progressBackgroundColor={palette.surface}
             />
           }
-          // Only label the browse lists — search results are self-explanatory
-          // (the "Saved pins" / "Places" headers live in `rows` instead).
+          // Only label the browse list — search results are self-explanatory
+          // (the "Your pins" / "Places" headers live in `rows` instead).
           ListHeaderComponent={
-            !trimmed && active ? (
+            !trimmed ? (
               <Text style={[monoLabelStyle, { paddingHorizontal: 24, paddingBottom: 8, paddingTop: 4 }]}>
-                {`// ${(FILTERS.find((f) => f.key === active)?.label ?? "").toUpperCase()}`}
+                {`// ${(SORTS.find((s) => s.key === sort)?.label ?? "").toUpperCase()}`}
               </Text>
             ) : null
           }
@@ -778,7 +768,7 @@ function FindContent({ user }: { user: User }) {
                 <ActivityIndicator color={iconColor} />
               </View>
             ) : (
-              <FindEmptyState query={trimmed} filter={active} />
+              <FindEmptyState query={trimmed} hasTags={selectedTags.length > 0} />
             )
           }
           ListFooterComponent={

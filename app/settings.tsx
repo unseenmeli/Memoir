@@ -1,5 +1,5 @@
 import { Feather } from "@expo/vector-icons";
-import type { User } from "@instantdb/react-native";
+import * as Linking from "expo-linking";
 import { useRouter } from "expo-router";
 import { useEffect, useState } from "react";
 import {
@@ -11,13 +11,26 @@ import {
   TextInput,
   View,
 } from "react-native";
-import { SafeAreaView } from "react-native-safe-area-context";
+import { GestureDetector, GestureHandlerRootView } from "react-native-gesture-handler";
+import Animated from "react-native-reanimated";
+import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { AuthGate } from "@/components/AuthGate";
+import { GlassSheetBackground } from "@/components/GlassSheetBackground";
 import { GlassView } from "@/components/GlassView";
-import { ScreenBackground } from "@/components/ScreenBackground";
-import { db } from "@/lib/db";
+import { EmailPasswordForm } from "@/components/EmailPasswordForm";
+import { HeaderPill } from "@/components/PinDetails";
+import {
+  changePassword,
+  errorMessage,
+  MIN_PASSWORD_LENGTH,
+  signOut,
+  type User,
+} from "@/lib/auth";
+import { usePins, useProfile } from "@/lib/data";
+import { useDragToDismiss } from "@/lib/dragToDismiss";
+import { haptics } from "@/lib/haptics";
 import { getPalette, withAlpha } from "@/lib/palette";
-import { updateDisplayName, type ProfileRecord } from "@/lib/profile";
+import { deleteAccountData, updateDisplayName } from "@/lib/profile";
 import { useTheme, type ThemePreference } from "@/lib/theme";
 
 const THEME_OPTIONS: { value: ThemePreference; label: string; icon: keyof typeof Feather.glyphMap }[] = [
@@ -55,7 +68,10 @@ function AppearanceControl() {
         return (
           <Pressable
             key={opt.value}
-            onPress={() => setPreference(opt.value)}
+            onPress={() => {
+              if (!active) haptics.selection();
+              setPreference(opt.value);
+            }}
             className="flex-1 active:opacity-70"
             style={{ borderRadius: 14, overflow: "hidden" }}
           >
@@ -76,10 +92,7 @@ function AppearanceControl() {
 function DisplayNameEditor({ user }: { user: User }) {
   const { scheme } = useTheme();
   const palette = getPalette(scheme);
-  const { data } = db.useQuery({
-    profiles: { $: { where: { "user.id": user.id } } },
-  });
-  const profile = (data?.profiles?.[0] ?? null) as ProfileRecord | null;
+  const { profile } = useProfile(user.id);
 
   const [name, setName] = useState("");
   const [saving, setSaving] = useState(false);
@@ -97,6 +110,7 @@ function DisplayNameEditor({ user }: { user: User }) {
     if (!profile || saving) return;
     const trimmed = name.trim();
     if (trimmed.length < 2) {
+      haptics.warning();
       setStatus({ kind: "err", text: "Name must be at least 2 characters." });
       return;
     }
@@ -108,9 +122,11 @@ function DisplayNameEditor({ user }: { user: User }) {
     setStatus(null);
     try {
       await updateDisplayName(profile.id, trimmed);
+      haptics.success();
       setStatus({ kind: "ok", text: "Saved." });
       setTouched(false);
     } catch {
+      haptics.error();
       setStatus({ kind: "err", text: "That name is taken — try another." });
     } finally {
       setSaving(false);
@@ -172,140 +188,556 @@ function DisplayNameEditor({ user }: { user: User }) {
   );
 }
 
+/** A glass-wrapped secure field. Three of them in a row, so it's a component. */
+function PasswordField({
+  value,
+  onChangeText,
+  placeholder,
+  autoComplete,
+  editable,
+  onSubmitEditing,
+  returnKeyType,
+}: {
+  value: string;
+  onChangeText: (text: string) => void;
+  placeholder: string;
+  autoComplete: "current-password" | "new-password";
+  editable: boolean;
+  onSubmitEditing?: () => void;
+  returnKeyType: "next" | "go";
+}) {
+  const { scheme } = useTheme();
+  const palette = getPalette(scheme);
+  return (
+    <View style={{ borderRadius: 14, overflow: "hidden" }}>
+      <GlassView radius={14} intensity={25}>
+        <TextInput
+          value={value}
+          onChangeText={onChangeText}
+          placeholder={placeholder}
+          placeholderTextColor={palette.textDim}
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          autoComplete={autoComplete}
+          textContentType={
+            autoComplete === "current-password" ? "password" : "newPassword"
+          }
+          editable={editable}
+          returnKeyType={returnKeyType}
+          onSubmitEditing={onSubmitEditing}
+          className="px-4 py-3.5 text-base font-outfit"
+          style={{ color: palette.text }}
+        />
+      </GlassView>
+    </View>
+  );
+}
+
+/**
+ * Changes the password of a signed-in account.
+ *
+ * Shown only to accounts that have one — a guest has no email to sign in with
+ * and no password to replace, so for them Settings offers `linkEmail` instead.
+ *
+ * The current password is required, not decorative: without it an unlocked
+ * phone is enough to lock the owner out of their own account. See
+ * `changePassword` in src/lib/auth.tsx for why proving it costs a sign-in.
+ */
+function ChangePasswordForm({ email }: { email: string }) {
+  const { scheme } = useTheme();
+  const palette = getPalette(scheme);
+
+  const [current, setCurrent] = useState("");
+  const [next, setNext] = useState("");
+  const [confirm, setConfirm] = useState("");
+  const [saving, setSaving] = useState(false);
+  const [status, setStatus] = useState<{ kind: "ok" | "err"; text: string } | null>(
+    null,
+  );
+
+  function fail(text: string) {
+    haptics.warning();
+    setStatus({ kind: "err", text });
+  }
+
+  async function save() {
+    if (saving) return;
+
+    // Checked here so the ordinary mistakes come back instantly and phrased
+    // for the person, rather than as an API error.
+    if (!current) return fail("Enter your current password.");
+    if (next.length < MIN_PASSWORD_LENGTH) {
+      return fail(`Use at least ${MIN_PASSWORD_LENGTH} characters.`);
+    }
+    if (next !== confirm) {
+      setConfirm("");
+      return fail("Those passwords don't match.");
+    }
+    if (next === current) {
+      return fail("That's already your password.");
+    }
+
+    setSaving(true);
+    setStatus(null);
+    try {
+      await changePassword(email, current, next);
+      haptics.success();
+      setStatus({ kind: "ok", text: "Password changed." });
+      // Nothing here should outlive a successful change.
+      setCurrent("");
+      setNext("");
+      setConfirm("");
+    } catch (err) {
+      haptics.error();
+      setStatus({
+        kind: "err",
+        text: errorMessage(err) ?? "Couldn't change your password.",
+      });
+      setCurrent("");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <View className="gap-3">
+      <PasswordField
+        value={current}
+        onChangeText={(t) => {
+          setCurrent(t);
+          setStatus(null);
+        }}
+        placeholder="Current password"
+        autoComplete="current-password"
+        editable={!saving}
+        returnKeyType="next"
+      />
+      <PasswordField
+        value={next}
+        onChangeText={(t) => {
+          setNext(t);
+          setStatus(null);
+        }}
+        placeholder={`New password — at least ${MIN_PASSWORD_LENGTH} characters`}
+        autoComplete="new-password"
+        editable={!saving}
+        returnKeyType="next"
+      />
+      <PasswordField
+        value={confirm}
+        onChangeText={(t) => {
+          setConfirm(t);
+          setStatus(null);
+        }}
+        placeholder="Confirm new password"
+        autoComplete="new-password"
+        editable={!saving}
+        returnKeyType="go"
+        onSubmitEditing={save}
+      />
+
+      <View className="flex-row items-center justify-between">
+        <Text
+          className={`flex-1 text-sm font-outfit ${
+            status?.kind === "err"
+              ? "text-red-600 dark:text-red-400"
+              : "text-emerald-600 dark:text-emerald-400"
+          }`}
+        >
+          {status?.text ?? " "}
+        </Text>
+        <Pressable
+          onPress={save}
+          disabled={saving}
+          className="rounded-lg px-4 py-2 active:opacity-80 disabled:opacity-40"
+          style={{ backgroundColor: palette.accent }}
+        >
+          {saving ? (
+            <ActivityIndicator size="small" color={palette.accentFg} />
+          ) : (
+            <Text
+              className="text-sm font-outfit-medium"
+              style={{ color: palette.accentFg }}
+            >
+              Change
+            </Text>
+          )}
+        </Pressable>
+      </View>
+    </View>
+  );
+}
+
+/** The red used for destructive actions — same as the delete icon on a pin. */
+const DANGER = "#ef4444";
+
+/**
+ * The published privacy policy — rendered from PRIVACY.md and deployed by
+ * .github/workflows/privacy-policy.yml, so this and the repo's copy cannot
+ * drift apart.
+ *
+ * App Store Connect takes this URL as metadata, which is what Apple actually
+ * requires. Linking it in-app as well is for the person using the app: the
+ * store listing is not somewhere you go looking once you've installed it.
+ */
+const PRIVACY_POLICY_URL = "https://unseenmeli.github.io/NewEra/";
+
 function SettingsContent({ user }: { user: User }) {
   const router = useRouter();
   const { scheme } = useTheme();
   const palette = getPalette(scheme);
+  const [deleting, setDeleting] = useState(false);
+  const { gesture: dragGesture, style: dragStyle } = useDragToDismiss(
+    () => router.back(),
+    !deleting,
+  );
+
+  // Just for the confirmation copy — telling someone exactly how much they're
+  // about to lose is the difference between a warning and a formality.
+  const { pins } = usePins(user.id);
+  const pinCount = pins.length;
+
+  const isGuest = !user.email;
 
   function confirmSignOut() {
+    if (deleting) return;
+    // A guest has no email to sign back in with, so signing out is not a
+    // reversible "see you later" — it strands every pin they made.
+    if (isGuest) {
+      Alert.alert(
+        "Sign out?",
+        "You're signed in as a guest, so there's no email to get back in with. Signing out means losing the pins you've made. Add an email first to keep them.",
+        [
+          { text: "Cancel", style: "cancel" },
+          {
+            text: "Sign out anyway",
+            style: "destructive",
+            onPress: () => {
+              void signOut();
+            },
+          },
+        ],
+      );
+      return;
+    }
     Alert.alert("Sign out", "Are you sure you want to sign out?", [
       { text: "Cancel", style: "cancel" },
       {
         text: "Sign out",
         style: "destructive",
-        onPress: () => db.auth.signOut(),
+        onPress: () => {
+          void signOut();
+        },
       },
     ]);
   }
 
+  async function runDelete() {
+    setDeleting(true);
+    try {
+      await deleteAccountData(user.id);
+      haptics.success();
+      // Close the sheet BEFORE signing out. Settings is a transparentModal, so
+      // signing out first fires AuthGate's redirect to /login with this modal
+      // still stacked on top of it.
+      router.back();
+      await signOut();
+    } catch (err) {
+      haptics.error();
+      setDeleting(false);
+      Alert.alert(
+        "Couldn't delete your account",
+        (err as Error)?.message ?? "Try again.",
+      );
+    }
+  }
+
+  function confirmDeleteAccount() {
+    if (deleting) return;
+    const what =
+      pinCount > 0
+        ? `your ${pinCount} ${pinCount === 1 ? "pin" : "pins"} and their photos`
+        : "your profile";
+    Alert.alert(
+      "Delete account",
+      `This permanently deletes ${what}. It can't be undone.`,
+      [
+        { text: "Cancel", style: "cancel" },
+        {
+          text: "Delete",
+          style: "destructive",
+          onPress: () =>
+            Alert.alert("Are you sure?", "There's no way to get this back.", [
+              { text: "Cancel", style: "cancel" },
+              {
+                text: "Delete everything",
+                style: "destructive",
+                onPress: runDelete,
+              },
+            ]),
+        },
+      ],
+    );
+  }
+
   return (
-    <ScreenBackground>
-      <SafeAreaView className="flex-1" edges={["top", "bottom"]}>
-        {/* Grabber handle — this route is presented as a modal sheet. */}
-        <View className="items-center pt-2">
-          <View
-            style={{
-              width: 36,
-              height: 4.5,
-              borderRadius: 3,
-              backgroundColor: palette.border,
-            }}
-          />
-        </View>
+    // Presented as `transparentModal` so the profile screen can show through
+    // the glass background — but that surface doesn't reliably feed fresh
+    // safe-area insets to the nested `SafeAreaView` (same issue as the pin
+    // details sheet), which was letting the header sit under the status bar
+    // with "Done" unreachable underneath it. A fresh provider here forces a
+    // real measurement scoped to this surface.
+    <SafeAreaProvider>
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        {/*
+         * The blur/tint background lives INSIDE the translating view, not
+         * outside it — so it's part of the card being dragged. If it sat
+         * outside (static, full-screen) while only the header+content moved,
+         * dragging down would reveal the sheet's own background in the gap
+         * instead of the real screen underneath, since that background never
+         * actually moved.
+         */}
+        <Animated.View style={[{ flex: 1 }, dragStyle]}>
+          <GlassSheetBackground>
+            <SafeAreaView className="flex-1" edges={["top", "bottom"]}>
+              <GestureDetector gesture={dragGesture}>
+                <View>
+                  {/* Grabber handle — also the drag-down-to-close target. */}
+                  <View className="items-center pt-2">
+                    <View
+                      style={{
+                        width: 36,
+                        height: 4.5,
+                        borderRadius: 3,
+                        backgroundColor: palette.border,
+                      }}
+                    />
+                  </View>
 
-        <View className="flex-row items-center justify-between px-5 py-3">
-          <Text
-            style={{
-              fontFamily: "Outfit_700Bold",
-              fontSize: 24,
-              letterSpacing: -0.4,
-              color: palette.text,
-            }}
-          >
-            Settings
-          </Text>
-          <Pressable onPress={() => router.back()} hitSlop={8} className="active:opacity-60">
-            <Text
-              className="text-base font-outfit-semibold"
-              style={{ color: palette.accent }}
-            >
-              Done
-            </Text>
-          </Pressable>
-        </View>
-
-        <ScrollView className="flex-1 px-5" contentContainerClassName="gap-8 pt-3 pb-10">
-          <View className="gap-3">
-            <Text
-              style={{
-                fontSize: 11,
-                letterSpacing: 1.2,
-                fontWeight: "700",
-                textTransform: "uppercase",
-                color: palette.textDim,
-              }}
-            >
-              Appearance
-            </Text>
-            <AppearanceControl />
-          </View>
-
-          <View className="gap-3">
-            <Text
-              style={{
-                fontSize: 11,
-                letterSpacing: 1.2,
-                fontWeight: "700",
-                textTransform: "uppercase",
-                color: palette.textDim,
-              }}
-            >
-              Display name
-            </Text>
-            <DisplayNameEditor user={user} />
-          </View>
-
-          <View className="gap-3">
-            <Text
-              style={{
-                fontSize: 11,
-                letterSpacing: 1.2,
-                fontWeight: "700",
-                textTransform: "uppercase",
-                color: palette.textDim,
-              }}
-            >
-              Account
-            </Text>
-            <View style={{ borderRadius: 14, overflow: "hidden" }}>
-              <GlassView radius={14} intensity={25}>
-                <View className="px-4 py-3.5">
-                  <Text className="text-xs" style={{ color: palette.textDim }}>
-                    Signed in as
-                  </Text>
-                  <Text
-                    className="mt-0.5 text-base font-outfit"
-                    style={{ color: palette.text }}
-                  >
-                    {user.email}
-                  </Text>
+                  <View className="flex-row items-center justify-between px-5 py-3">
+                    <Text
+                      style={{
+                        fontFamily: "Outfit_700Bold",
+                        fontSize: 24,
+                        letterSpacing: -0.4,
+                        color: palette.text,
+                      }}
+                    >
+                      Settings
+                    </Text>
+                    <HeaderPill
+                      label="Done"
+                      color={palette.accentFg}
+                      fill={palette.accent}
+                      onPress={() => router.back()}
+                    />
+                  </View>
                 </View>
-              </GlassView>
-            </View>
-          </View>
-        </ScrollView>
+              </GestureDetector>
 
-        {/* Sign out pinned to the bottom of the screen. */}
-        <View className="px-5 pb-2 pt-3">
-          <Pressable
-            onPress={confirmSignOut}
-            className="items-center rounded-2xl px-4 py-3.5 active:opacity-70"
-            style={{
-              borderWidth: 1,
-              borderColor: withAlpha(palette.accent, 0.55),
-              backgroundColor: withAlpha(palette.accent, 0.1),
-            }}
-          >
-            <Text
-              className="text-base font-outfit-semibold"
-              style={{ color: palette.accent }}
-            >
-              Sign out
-            </Text>
-          </Pressable>
-        </View>
-      </SafeAreaView>
-    </ScreenBackground>
+              <ScrollView className="flex-1 px-5" contentContainerClassName="gap-8 pt-3 pb-10">
+                <View className="gap-3">
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      letterSpacing: 1.2,
+                      fontWeight: "700",
+                      textTransform: "uppercase",
+                      color: palette.textDim,
+                    }}
+                  >
+                    Appearance
+                  </Text>
+                  <AppearanceControl />
+                </View>
+
+                <View className="gap-3">
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      letterSpacing: 1.2,
+                      fontWeight: "700",
+                      textTransform: "uppercase",
+                      color: palette.textDim,
+                    }}
+                  >
+                    Display name
+                  </Text>
+                  <DisplayNameEditor user={user} />
+                </View>
+
+                {/* A guest has no password to change — they get the
+                    "add an email" form in Account below instead. */}
+                {isGuest ? null : (
+                  <View className="gap-3">
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        letterSpacing: 1.2,
+                        fontWeight: "700",
+                        textTransform: "uppercase",
+                        color: palette.textDim,
+                      }}
+                    >
+                      Password
+                    </Text>
+                    <ChangePasswordForm email={user.email ?? ""} />
+                  </View>
+                )}
+
+                <View className="gap-3">
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      letterSpacing: 1.2,
+                      fontWeight: "700",
+                      textTransform: "uppercase",
+                      color: palette.textDim,
+                    }}
+                  >
+                    Account
+                  </Text>
+                  {isGuest ? (
+                    // A guest session lives only on this device and only until
+                    // they sign out. `mode="linkEmail"` adds the address and
+                    // password to the anonymous account they already have
+                    // rather than starting a new one, so the same user id —
+                    // and every pin hanging off it — carries across.
+                    <View className="gap-3">
+                      <View style={{ borderRadius: 14, overflow: "hidden" }}>
+                        <GlassView radius={14} intensity={25}>
+                          <View className="px-4 py-3.5">
+                            <Text
+                              className="text-base font-outfit-semibold"
+                              style={{ color: palette.text }}
+                            >
+                              Guest account
+                            </Text>
+                            <Text
+                              className="mt-1 text-sm font-outfit"
+                              style={{ color: palette.textDim }}
+                            >
+                              Add an email and password so you don&apos;t lose
+                              your pins if you sign out, reinstall, or switch
+                              phones. Use an address you haven&apos;t used with
+                              this app before.
+                            </Text>
+                          </View>
+                        </GlassView>
+                      </View>
+                      <EmailPasswordForm compact mode="linkEmail" />
+                    </View>
+                  ) : (
+                    <View style={{ borderRadius: 14, overflow: "hidden" }}>
+                      <GlassView radius={14} intensity={25}>
+                        <View className="px-4 py-3.5">
+                          <Text className="text-xs" style={{ color: palette.textDim }}>
+                            Signed in as
+                          </Text>
+                          <Text
+                            className="mt-0.5 text-base font-outfit"
+                            style={{ color: palette.text }}
+                          >
+                            {user.email}
+                          </Text>
+                        </View>
+                      </GlassView>
+                    </View>
+                  )}
+                </View>
+
+                <View className="gap-3">
+                  <Text
+                    style={{
+                      fontSize: 11,
+                      letterSpacing: 1.2,
+                      fontWeight: "700",
+                      textTransform: "uppercase",
+                      color: palette.textDim,
+                    }}
+                  >
+                    About
+                  </Text>
+                  <Pressable
+                    onPress={() => {
+                      // Non-fatal: no browser, or a URL that won't open, is
+                      // not worth an error dialog in Settings.
+                      void Linking.openURL(PRIVACY_POLICY_URL).catch(() => {});
+                    }}
+                    accessibilityRole="link"
+                    accessibilityLabel="Open the privacy policy in your browser"
+                    className="active:opacity-70"
+                    style={{ borderRadius: 14, overflow: "hidden" }}
+                  >
+                    <GlassView radius={14} intensity={25}>
+                      <View className="flex-row items-center justify-between px-4 py-3.5">
+                        <Text
+                          className="text-base font-outfit"
+                          style={{ color: palette.text }}
+                        >
+                          Privacy policy
+                        </Text>
+                        <Feather
+                          name="external-link"
+                          size={16}
+                          color={palette.textDim}
+                        />
+                      </View>
+                    </GlassView>
+                  </Pressable>
+                </View>
+              </ScrollView>
+
+              {/* Sign out and account deletion pinned to the bottom. */}
+              <View className="gap-2.5 px-5 pb-2 pt-3">
+                <Pressable
+                  onPress={confirmSignOut}
+                  disabled={deleting}
+                  className="items-center rounded-2xl px-4 py-3.5 active:opacity-70 disabled:opacity-40"
+                  style={{
+                    borderWidth: 1,
+                    borderColor: withAlpha(palette.accent, 0.55),
+                    backgroundColor: withAlpha(palette.accent, 0.1),
+                  }}
+                >
+                  <Text
+                    className="text-base font-outfit-semibold"
+                    style={{ color: palette.accent }}
+                  >
+                    Sign out
+                  </Text>
+                </Pressable>
+
+                <Pressable
+                  onPress={confirmDeleteAccount}
+                  disabled={deleting}
+                  accessibilityRole="button"
+                  accessibilityLabel="Delete account"
+                  className="items-center rounded-2xl px-4 py-3.5 active:opacity-70"
+                  style={{
+                    borderWidth: 1,
+                    borderColor: withAlpha(DANGER, 0.55),
+                    backgroundColor: withAlpha(DANGER, 0.1),
+                  }}
+                >
+                  {deleting ? (
+                    <ActivityIndicator size="small" color={DANGER} />
+                  ) : (
+                    <Text
+                      className="text-base font-outfit-semibold"
+                      style={{ color: DANGER }}
+                    >
+                      Delete account
+                    </Text>
+                  )}
+                </Pressable>
+              </View>
+            </SafeAreaView>
+          </GlassSheetBackground>
+        </Animated.View>
+      </GestureHandlerRootView>
+    </SafeAreaProvider>
   );
 }
 

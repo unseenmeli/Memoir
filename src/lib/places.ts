@@ -26,12 +26,20 @@ const TIMEOUT_MS = 6000;
 const RESULT_LIMIT = 8;
 
 // Nominatim's usage policy requires identifying the calling app via
-// User-Agent (or Referer). Browsers refuse to let scripts set User-Agent, so
+// User-Agent (or Referer) AND giving their operators a way to reach whoever
+// runs it — a bundle id alone doesn't let anyone contact you before they
+// throttle or block you. Browsers refuse to let scripts set User-Agent, so
 // this only applies on native, where fetch has no such restriction.
+//
+// One address, not both maintainers', to keep the header short. It has to be
+// one somebody actually reads: it is the only warning OSM can give before
+// throttling or blocking the app, and being blocked breaks both place search
+// and the country lookup on every pin save.
+const CONTACT = "bnachkebia27@gmail.com";
 const HEADERS =
   Platform.OS === "web"
     ? undefined
-    : { "User-Agent": "NewEraMapsApp/1.0 (com.newera.app)" };
+    : { "User-Agent": `NewEra/1.0 (com.newera.app; ${CONTACT})` };
 
 type NominatimHit = {
   place_id: number;
@@ -115,24 +123,30 @@ export function usePlaceSearch(
 
       (async () => {
         try {
-          const [local, global] = await Promise.all([
-            viewerCountry
-              ? searchNominatim(trimmed, {
-                  countryCode: viewerCountry,
-                  signal: controller.signal,
-                }).catch(() => [])
-              : Promise.resolve([]),
-            searchNominatim(trimmed, { signal: controller.signal }).catch(
-              () => [],
-            ),
-          ]);
+          // One request per search, not two. This used to fire a
+          // country-scoped and a worldwide query in parallel, which made the
+          // "well under 1 request/second" claim above false — two concurrent
+          // requests per debounce is ~4/s while someone is actively typing,
+          // and Nominatim's policy is read as no-concurrent-requests. Local
+          // relevance is recovered by ranking rather than by a second call.
+          const found = await searchNominatim(trimmed, {
+            signal: controller.signal,
+          }).catch(() => []);
 
           // A newer keystroke started a fresh request — don't overwrite it.
           if (controllerRef.current !== controller) return;
 
           const seen = new Set<string>();
           const merged: PlaceResult[] = [];
-          for (const place of [...local, ...global]) {
+          // Same-country hits first: cheaper than a second round-trip and it
+          // answers the same "places near me" intent.
+          const ranked = viewerCountry
+            ? [
+                ...found.filter((p) => p.countryCode === viewerCountry),
+                ...found.filter((p) => p.countryCode !== viewerCountry),
+              ]
+            : found;
+          for (const place of ranked) {
             if (seen.has(place.id)) continue;
             seen.add(place.id);
             merged.push(place);
@@ -152,4 +166,52 @@ export function usePlaceSearch(
   }, [query, viewerCountry]);
 
   return { results, loading };
+}
+
+const REVERSE_ENDPOINT = "https://nominatim.openstreetmap.org/reverse";
+const REVERSE_TIMEOUT_MS = 4000;
+
+/**
+ * Resolves which country a coordinate sits in (ISO 3166-1 alpha-2, uppercase).
+ *
+ * This is the only honest source for a pin's country: the viewer's IP tells
+ * you where the *phone* is, which stamps every pin someone drops abroad with
+ * their home country. `zoom=3` asks Nominatim for the country-level answer
+ * only, which is the cheapest response it can build.
+ *
+ * Best-effort like everything else here — offline, slow, or blocked all come
+ * back as null rather than throwing, because a missing country costs a search
+ * ranking boost and a profile stat, never a save.
+ */
+export async function reverseGeocodeCountry(
+  latitude: number,
+  longitude: number,
+): Promise<string | null> {
+  const params = new URLSearchParams({
+    lat: String(latitude),
+    lon: String(longitude),
+    format: "jsonv2",
+    addressdetails: "1",
+    zoom: "3",
+  });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REVERSE_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${REVERSE_ENDPOINT}?${params}`, {
+      signal: controller.signal,
+      headers: HEADERS,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const body = (await response.json()) as Pick<NominatimHit, "address">;
+    const code = (body.address?.country_code ?? "").toUpperCase();
+    // A pin in the middle of the ocean has no country, and that's a valid
+    // answer — the column is nullable precisely for it.
+    return /^[A-Z]{2}$/.test(code) ? code : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }

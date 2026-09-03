@@ -116,3 +116,35 @@ export function placementRegion(
     longitudeDelta: delta * aspect,
   };
 }
+
+/** Padding around a fitted set of pins, as a fraction of their span. */
+const FIT_PADDING = 0.4;
+/** Floor on a fitted span, so a single pin doesn't zoom to street level. */
+const MIN_FIT_DELTA = 0.01;
+
+/**
+ * The region that frames every given coordinate.
+ *
+ * Used for the one-time opening shot: a fixed "home" region is a guess that is
+ * wrong for everyone who doesn't live there, whereas the pins someone has
+ * already saved are, by definition, where their map is.
+ */
+export function regionForCoords(
+  coords: { latitude: number; longitude: number }[],
+): Region | null {
+  if (coords.length === 0) return null;
+
+  const lats = coords.map((c) => c.latitude);
+  const lngs = coords.map((c) => c.longitude);
+  const minLat = Math.min(...lats);
+  const maxLat = Math.max(...lats);
+  const minLng = Math.min(...lngs);
+  const maxLng = Math.max(...lngs);
+
+  return {
+    latitude: (minLat + maxLat) / 2,
+    longitude: (minLng + maxLng) / 2,
+    latitudeDelta: Math.max((maxLat - minLat) * (1 + FIT_PADDING), MIN_FIT_DELTA),
+    longitudeDelta: Math.max((maxLng - minLng) * (1 + FIT_PADDING), MIN_FIT_DELTA),
+  };
+}

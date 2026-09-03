@@ -12,6 +12,7 @@ import Animated, {
 } from "react-native-reanimated";
 import { runOnJS } from "react-native-worklets";
 import { GlassView } from "@/components/GlassView";
+import { haptics } from "@/lib/haptics";
 import { TAB_BAR_PILL_HEIGHT, useTabBarBottomOffset } from "@/lib/tabBar";
 import { useTheme } from "@/lib/theme";
 import { getPalette } from "@/lib/palette";
@@ -99,7 +100,10 @@ export function GlassTabBar({ state, navigation }: BottomTabBarProps) {
 
   function goToIndex(index: number) {
     const clamped = Math.max(0, Math.min(state.routes.length - 1, index));
+    // Re-tapping the current tab is a no-op, and buzzing for it would make the
+    // most-pressed control in the app the noisiest one.
     if (clamped === state.index) return;
+    haptics.selection();
     navigation.navigate(state.routes[clamped].name);
   }
 

@@ -1,0 +1,72 @@
+# Publishes the privacy policy to GitHub Pages, rendered from PRIVACY.md.
+#
+# App Store Connect will not accept a submission without a reachable
+# privacy policy URL. Building the page from PRIVACY.md rather than
+# hand-maintaining a copy means the published policy cannot silently drift
+# from the one in the repo - which matters, because the policy has to keep
+# describing what the app actually does.
+#
+# ONE-TIME SETUP: repo Settings -> Pages -> Build and deployment ->
+# Source: "GitHub Actions". Until that is switched over, deploy-pages
+# fails with "Get Pages site failed". The published URL is then:
+#
+#   https://unseenmeli.github.io/NewEra/
+#
+# Paste that into App Store Connect (App Privacy -> Privacy Policy URL).
+name: Pages
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - PRIVACY.md
+      - scripts/build-privacy-page.py
+      - .github/workflows/pages.yml
+  # So the page can be republished without touching the policy — handy for the
+  # very first deploy, and after enabling Pages.
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  pages: write
+  # deploy-pages authenticates to Pages with an OIDC token, not a PAT.
+  id-token: write
+
+# Never let two deploys race; the newer policy should win, not whichever
+# runner happens to finish last.
+concurrency:
+  group: pages
+  cancel-in-progress: true
+
+jobs:
+  build-and-deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install renderer
+        run: pip install markdown
+
+      - name: Build page
+        run: python scripts/build-privacy-page.py --out _site
+
+      - name: Check for placeholders
+        run: |
+          if grep -rniE 'TODO|REPLACE_WITH|FIXME' _site/index.html; then
+            echo "::error::Placeholder text found in the built policy page."
+            exit 1
+          fi
+
+      - uses: actions/upload-pages-artifact@v3
+        with:
+          path: _site
+
+      - id: deploy
+        uses: actions/deploy-pages@v4

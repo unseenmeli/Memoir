@@ -1,8 +1,7 @@
-import type { User } from "@instantdb/react-native";
 import { useRouter } from "expo-router";
 import { useEffect } from "react";
 import { Text, View } from "react-native";
-import { db } from "@/lib/db";
+import { useAuth, type User } from "@/lib/auth";
 import { useBootBlocker } from "@/lib/loading";
 
 /**
@@ -14,7 +13,7 @@ export function AuthGate({
   children: (user: User) => React.ReactNode;
 }) {
   const router = useRouter();
-  const { isLoading, error, user } = db.useAuth();
+  const { isLoading, error, user } = useAuth();
 
   // Every tab screen renders through here, so this one blocker keeps the boot
   // splash up until auth resolves on whichever page opens first.
