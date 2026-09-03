@@ -9,8 +9,8 @@ import {
   View,
 } from "react-native";
 import { SafeAreaView } from "react-native-safe-area-context";
-import { MagicCodeForm, errorMessage } from "@/components/MagicCodeForm";
-import { db } from "@/lib/db";
+import { EmailPasswordForm } from "@/components/EmailPasswordForm";
+import { errorMessage, signInAsGuest, useAuth } from "@/lib/auth";
 import { seedExamplePins } from "@/lib/demo";
 import { haptics } from "@/lib/haptics";
 import { useBootBlocker } from "@/lib/loading";
@@ -21,7 +21,7 @@ export default function LoginScreen() {
   const router = useRouter();
   const { scheme } = useTheme();
   const palette = getPalette(scheme);
-  const { isLoading, user } = db.useAuth();
+  const { isLoading, user } = useAuth();
   const [guestPending, setGuestPending] = useState(false);
   const [guestError, setGuestError] = useState("");
 
@@ -37,23 +37,23 @@ export default function LoginScreen() {
   }, [isLoading, user, router]);
 
   /**
-   * Guest sign-in. Two jobs: it lets someone try the app before handing over
-   * an email, and it is the only way an App Review tester can get in at all —
-   * magic codes go to a live inbox they don't have access to.
+   * Guest sign-in. Lets someone see the app before handing over an email, and
+   * gives an App Review tester a way in without being issued credentials.
    *
-   * Instant upgrades a guest in place when they later sign in with an email,
-   * keeping everything they made, so this is not a dead-end trial.
+   * Not a dead-end trial: adding an email and password later from Settings
+   * upgrades this same anonymous account in place, so everything they made
+   * comes with them.
    */
   async function continueAsGuest() {
     if (guestPending) return;
     setGuestPending(true);
     setGuestError("");
     try {
-      const result = await db.auth.signInAsGuest();
+      const guest = await signInAsGuest();
       haptics.success();
       // A few obviously-labelled sample pins, so the map isn't empty on the
       // very first run. Never blocks entry if it fails.
-      await seedExamplePins(result.user.id).catch(() => {});
+      await seedExamplePins(guest.id).catch(() => {});
     } catch (err) {
       haptics.error();
       setGuestError(
@@ -74,7 +74,7 @@ export default function LoginScreen() {
         behavior={Platform.OS === "ios" ? "padding" : undefined}
       >
         <View className="flex-1 justify-center px-6">
-          <MagicCodeForm />
+          <EmailPasswordForm />
 
           <View className="mt-8 gap-3">
             <View className="flex-row items-center gap-3">
@@ -109,7 +109,7 @@ export default function LoginScreen() {
               className="text-center text-xs font-outfit"
               style={{ color: palette.textDim }}
             >
-              You can add your email later — your pins come with you.
+              You can add an email later — your pins come with you.
             </Text>
 
             {guestError ? (

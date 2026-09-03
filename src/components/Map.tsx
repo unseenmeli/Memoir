@@ -1,5 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import type { User } from "@instantdb/react-native";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Platform, Pressable, StyleSheet, Text, View } from "react-native";
 import MapView, {
@@ -9,7 +8,8 @@ import MapView, {
 } from "react-native-maps";
 import Animated, { FadeInDown, FadeOutDown } from "react-native-reanimated";
 import { GlassView } from "@/components/GlassView";
-import { db } from "@/lib/db";
+import type { User } from "@/lib/auth";
+import { usePins } from "@/lib/data";
 import { haptics } from "@/lib/haptics";
 import { PinComposer } from "@/components/PinComposer";
 import { PinDetails, sortPhotos, type PinRecord } from "@/components/PinDetails";
@@ -202,17 +202,10 @@ export function Map({
   // without re-running every time the list identity changes.
   const pinsRef = useRef<PinRecord[]>([]);
 
-  // Only the viewer's own pins — pins are private (see instant.perms.ts). The
-  // `where` mirrors the server rule rather than replacing it; `owner` stays in
-  // the query because PinDetails reads `pin.owner?.id` to decide whether to
-  // show Edit/Delete, and an unpopulated link would silently hide them.
-  const { data, isLoading } = db.useQuery({
-    pins: {
-      $: { where: { "owner.id": user.id } },
-      photos: {},
-      owner: {},
-    },
-  });
+  // Only the viewer's own pins — pins are private, and row level security is
+  // what enforces that (see the policies in supabase/migrations). This query
+  // is shared with every other screen asking the same thing.
+  const { pins, isLoading } = usePins(user.id);
 
   // `onMapLoaded` is the real "tiles are painted" signal, but it only fires on
   // Google-backed maps — on Apple Maps it may never arrive. So once the view
@@ -287,7 +280,6 @@ export function Map({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [target?.ts, mapReady]);
 
-  const pins = (data?.pins ?? []) as unknown as PinRecord[];
   pinsRef.current = pins;
 
   // Warm the cache for the photo each pin opens on, so tapping a label paints

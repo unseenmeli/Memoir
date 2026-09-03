@@ -19,39 +19,25 @@ import Animated from "react-native-reanimated";
 import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { GlassSheetBackground } from "@/components/GlassSheetBackground";
 import { GlassView } from "@/components/GlassView";
+import type { PinPhoto, PinRecord } from "@/lib/data";
 import { useDragToDismiss } from "@/lib/dragToDismiss";
 import { haptics } from "@/lib/haptics";
 import { deletePin } from "@/lib/pins";
 import { getPalette, monoFont } from "@/lib/palette";
 import { useTheme } from "@/lib/theme";
 
-export type PinPhoto = { id: string; url: string; path?: string };
-type PinOwner = { id: string; email?: string };
-
-export type PinRecord = {
-  id: string;
-  name: string;
-  description: string;
-  latitude: number;
-  longitude: number;
-  /** ISO 3166-1 alpha-2. Absent on pins created before the field existed. */
-  country?: string | null;
-  /** Free-form labels, stored normalized. Absent on older pins. */
-  tags?: string[] | null;
-  createdAt: number;
-  photos: PinPhoto[];
-  // `owner` is a has-one link, so Instant returns a single object (or null).
-  owner?: PinOwner | null;
-};
+// Re-exported so the screens that render pins can keep importing the shape
+// from the component that defines how a pin looks.
+export type { PinPhoto, PinRecord };
 
 const PHOTO_WIDTH = Dimensions.get("window").width - 40;
 
 /**
- * Instant doesn't guarantee any particular order for a pin's `photos` link,
- * so relying on query order to mean "upload order" is unreliable. Each
- * photo's storage path ends in `{index}-{name}` (see `uploadPhoto` in
- * lib/pins.ts), so sort by that index instead — this is what makes "the
- * first picture" stable everywhere it's shown.
+ * A pin's photos come back in whatever order the join produced, which is not
+ * upload order and not stable between fetches. Every photo's `path` ends in
+ * `{index}-{name}` — a Cloudinary public id and a storage key alike (see
+ * `uploadPhoto` in lib/pins.ts) — so sort by that index instead. This is what
+ * makes "the first picture" stable everywhere it's shown.
  *
  * Anchored to the final path segment on purpose. Matching `/(\d+)-` anywhere
  * in the path used to hit the *pin id* first whenever a UUID happened to start
@@ -289,10 +275,10 @@ export function PinDetails({
         onPress: async () => {
           setDeleting(true);
           try {
-            await deletePin(
-              pin.id,
-              pin.photos.map((p) => p.id),
-            );
+            // Only the id: the photo objects to remove are read back from the
+            // database, so a photo this screen never managed to render still
+            // gets its bytes cleaned up.
+            await deletePin(pin.id);
             haptics.success();
             onClose();
           } catch (err) {

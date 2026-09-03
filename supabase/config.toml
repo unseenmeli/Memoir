@@ -1,0 +1,78 @@
+# Supabase CLI config.
+#
+# This file drives LOCAL development (`supabase start`) *and* the hosted
+# project: `supabase config push` sends the auth block below through the
+# Management API, so the settings sign-in depends on live in the repo instead
+# of in someone's dashboard session.
+#
+# READ THIS BEFORE ASSUMING AN OMITTED KEY IS LEFT ALONE. `config push` sends
+# the fully RESOLVED config — every key the CLI has a default for, whether or
+# not it appears here. An omitted setting is therefore not "keep whatever the
+# dashboard has", it is "overwrite it with the CLI default". That is how
+# recovery emails ended up pointing at http://127.0.0.1:3000. Anything that
+# matters gets written down here.
+#
+#   npx supabase login
+#   npx supabase link --project-ref wgmbcglijhapfxvuarzl
+#   npx supabase config push
+
+project_id = "wgmbcglijhapfxvuarzl"
+
+[auth]
+# Nothing in the app depends on this: no email is sent, so no link is ever
+# built from it. It is pinned anyway because `config push` sends the fully
+# resolved config - omitting it would overwrite the project's value with
+# the CLI default, http://127.0.0.1:3000.
+site_url = "https://unseenmeli.github.io/NewEra/"
+
+# "Look around first" on the login screen signs in anonymously. Without this
+# the guest button fails, and an App Review tester has no way into the app at
+# all.
+enable_anonymous_sign_ins = true
+
+[auth.email]
+enable_signup = true
+
+# THIS APP SENDS NO EMAIL AT ALL, and this line is what guarantees it.
+#
+# `enable_confirmations = false` sets Auth's `mailer_autoconfirm`: a signup is
+# confirmed the instant it is created, so no confirmation mail is generated
+# and `signInWithPassword` never had a reason to send one. That matters
+# because the project is on Supabase's built-in email service, which delivers
+# only to pre-authorized org members and caps out at 2 messages an hour - any
+# flow that mails a real user is broken on it by construction.
+#
+# It is also what makes the guest upgrade work. Auth applies an email change
+# without mailing anything only for `user.IsAnonymous && Mailer.Autoconfirm`
+# (see `UpdateUser` in supabase/auth) — which is exactly `linkEmailToGuest` in
+# src/lib/auth.tsx and nothing else. A *non*-anonymous user changing address
+# would still trigger a send that this project cannot deliver, so don't add a
+# "change my email" screen without setting up SMTP first.
+enable_confirmations = false
+
+# Sign-in is email + password. Auth's own floor is 6 — this is the app's.
+minimum_password_length = 8
+
+# NO EMAIL IS CONFIGURED, so there is no password recovery. A forgotten
+# password is an unrecoverable account, and the sign-up screen says so out
+# loud rather than letting people find out later.
+#
+# This is a deliberate scope call for v1, not an oversight. Recovery needs
+# custom SMTP for two independent reasons: Supabase's built-in provider
+# delivers only to pre-authorized org members (so no real user could ever
+# receive the mail), and only projects with custom SMTP may edit the auth
+# email templates (so the mail could not be made to carry a code rather
+# than a link). See "Adding password recovery" in README.md for what it
+# takes; `changePassword` in src/lib/auth.tsx already handles the case
+# where someone knows their password and wants a new one.
+
+[functions.cloudinary-sign]
+# `auth: 'user'` inside the function, so the platform's own JWT gate is exactly
+# the right check to leave on. Every signature it hands out is scoped to a path
+# built from the caller's verified id.
+verify_jwt = true
+
+[functions.delete-account]
+# The function uses `auth: 'user'`, so the platform's own JWT gate is exactly
+# the right check to leave switched on.
+verify_jwt = true

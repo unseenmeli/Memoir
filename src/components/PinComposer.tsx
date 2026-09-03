@@ -20,7 +20,7 @@ import { SafeAreaProvider, SafeAreaView } from "react-native-safe-area-context";
 import { GlassSheetBackground } from "@/components/GlassSheetBackground";
 import { GlassView } from "@/components/GlassView";
 import { HeaderPill, nextPhotoIndex, type PinRecord } from "@/components/PinDetails";
-import { db } from "@/lib/db";
+import { usePins } from "@/lib/data";
 import { useDragToDismiss } from "@/lib/dragToDismiss";
 import { haptics } from "@/lib/haptics";
 import { createPin, MAX_PINS_PER_USER, updatePin } from "@/lib/pins";
@@ -118,16 +118,12 @@ export function PinComposer({
   const { gesture: dragGesture, style: dragStyle, reset: resetDrag } =
     useDragToDismiss(handleClose, !saving);
 
-  // The tag vocabulary already in use, for autocomplete. Queried here rather
-  // than passed down so the composer works wherever it's mounted. Scoped to
-  // this user because pins are private — "my labels", not everyone's.
-  const { data: tagData } = db.useQuery({
-    pins: { $: { where: { "owner.id": userId } } },
-  });
-  const allTags = useMemo(
-    () => collectTags((tagData?.pins ?? []) as { tags?: unknown }[]),
-    [tagData],
-  );
+  // The tag vocabulary already in use, for autocomplete. Read here rather
+  // than passed down so the composer works wherever it's mounted; the query is
+  // shared with whatever screen is behind it, so this costs no extra fetch.
+  // Scoped to this user because pins are private — "my labels", not everyone's.
+  const { pins: ownPins } = usePins(userId);
+  const allTags = useMemo(() => collectTags(ownPins), [ownPins]);
   const suggestions = useMemo(
     () =>
       tags.length >= MAX_TAGS_PER_PIN
@@ -364,23 +360,55 @@ export function PinComposer({
                 <ScrollView
                   horizontal
                   showsHorizontalScrollIndicator={false}
-                  contentContainerClassName="gap-3"
+                  // A ScrollView's root carries `flexGrow: 1`. Nested in the
+                  // form's column that makes it swallow every pixel the sheet
+                  // has spare, so the row stretched to fill the sheet instead
+                  // of hugging one row of 96pt tiles. Pin it to its content
+                  // and align tiles to the top so nothing can be stretched
+                  // vertically to fit the box.
+                  //
+                  // gap moves here from contentContainerClassName because
+                  // NativeWind compiles that prop down to contentContainerStyle
+                  // — passing both would let one silently drop the other.
+                  style={{ flexGrow: 0 }}
+                  contentContainerStyle={{ gap: 12, alignItems: "flex-start" }}
                 >
+                  {/*
+                   * One box owns the size, one owns the clip. This used to be
+                   * three nested 96pt boxes — the Pressable and GlassView each
+                   * rounding and clipping at the same size, with the content
+                   * pinned to its own fixed w-24 inside them. Two rounded
+                   * `overflow: hidden` masks over identical bounds don't round
+                   * to the same physical pixels, so the glass edge sat a hair
+                   * proud on the right and the tile read as lopsided next to
+                   * the square thumbnails. Now the Pressable alone sets 96pt
+                   * and GlassView fills it, so the plus and label centre
+                   * against the same box that draws the border.
+                   */}
                   <Pressable
                     onPress={pickPhotos}
                     className="active:opacity-70"
-                    style={{ height: 96, width: 96, borderRadius: 20, overflow: "hidden" }}
+                    // A derived square: one dimension plus aspectRatio, and
+                    // alignSelf so the row can never stretch the cross axis.
+                    // The rounded corners live on the GlassView below.
+                    style={{ width: 96, aspectRatio: 1, alignSelf: "flex-start" }}
                   >
-                    <GlassView radius={20} intensity={25}>
-                      <View className="h-24 w-24 items-center justify-center">
-                        <Feather name="plus" size={22} color={palette.text} />
-                        <Text
-                          className="mt-1 text-xs font-outfit"
-                          style={{ color: palette.textDim }}
-                        >
-                          Add
-                        </Text>
-                      </View>
+                    <GlassView
+                      radius={20}
+                      intensity={25}
+                      style={{
+                        flex: 1,
+                        alignItems: "center",
+                        justifyContent: "center",
+                      }}
+                    >
+                      <Feather name="plus" size={22} color={palette.text} />
+                      <Text
+                        className="mt-1 text-xs font-outfit"
+                        style={{ color: palette.textDim }}
+                      >
+                        Add
+                      </Text>
                     </GlassView>
                   </Pressable>
 

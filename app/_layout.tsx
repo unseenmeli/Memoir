@@ -14,6 +14,7 @@ import { StatusBar } from "expo-status-bar";
 import { useEffect } from "react";
 import { GestureHandlerRootView } from "react-native-gesture-handler";
 import { LoadingScreen } from "@/components/LoadingScreen";
+import { AuthProvider } from "@/lib/auth";
 import { LoadingProvider, useBootBlocker } from "@/lib/loading";
 import { MapFocusProvider } from "@/lib/mapFocus";
 import { ThemeProvider, useTheme } from "@/lib/theme";
@@ -58,6 +59,10 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <ThemeProvider>
+        {/* Above the router: every screen reads the session through
+            `useAuth`, and one provider keeps that to a single auth listener
+            no matter how many of them are mounted. */}
+        <AuthProvider>
         <LoadingProvider>
           <MapFocusProvider>
             <ThemedStatusBar />
@@ -79,6 +84,7 @@ export default function RootLayout() {
             <LoadingScreen />
           </MapFocusProvider>
         </LoadingProvider>
+        </AuthProvider>
       </ThemeProvider>
     </GestureHandlerRootView>
   );

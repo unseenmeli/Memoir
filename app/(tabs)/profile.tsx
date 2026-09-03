@@ -1,5 +1,4 @@
 import { Feather } from "@expo/vector-icons";
-import type { User } from "@instantdb/react-native";
 import * as ImagePicker from "expo-image-picker";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
@@ -20,13 +19,14 @@ import { GlassView } from "@/components/GlassView";
 import { PinComposer } from "@/components/PinComposer";
 import { PinDetails, sortPhotos, type PinRecord } from "@/components/PinDetails";
 import { ScreenBackground } from "@/components/ScreenBackground";
-import { db } from "@/lib/db";
+import type { User } from "@/lib/auth";
+import { usePins, useProfile } from "@/lib/data";
 import { haptics } from "@/lib/haptics";
 import { useBootBlocker } from "@/lib/loading";
 import { useRefresh } from "@/lib/refresh";
 import { useMapFocus } from "@/lib/mapFocus";
 import { getPalette, mix, monoFont, withAlpha } from "@/lib/palette";
-import { ensureProfile, updateAvatar, type ProfileRecord } from "@/lib/profile";
+import { ensureProfile, updateAvatar } from "@/lib/profile";
 import { collectTags } from "@/lib/tags";
 import { useTabBarHeight } from "@/lib/tabBar";
 import { useTheme } from "@/lib/theme";
@@ -158,31 +158,22 @@ function ProfileContent({ user }: { user: User }) {
   const [editing, setEditing] = useState<PinRecord | null>(null);
   const creatingRef = useRef(false);
 
-  const { data, isLoading } = db.useQuery({
-    profiles: {
-      $: { where: { "user.id": user.id } },
-      avatar: {},
-    },
-    pins: {
-      $: { where: { "owner.id": user.id }, order: { createdAt: "desc" } },
-      photos: {},
-      owner: {},
-    },
-  });
+  // Newest first, ordered by the database — see `fetchPins` in lib/data.ts.
+  const { pins, isLoading: pinsLoading } = usePins(user.id);
+  const { profile, isLoading: profileLoading } = useProfile(user.id);
+  const isLoading = pinsLoading || profileLoading;
 
   // Hold the boot splash until the pins/profile query lands, so the collage
   // never flashes empty on a cold start.
   useBootBlocker("profile", isLoading);
 
-  const profile = (data?.profiles?.[0] ?? null) as ProfileRecord | null;
-  const pins = (data?.pins ?? []) as unknown as PinRecord[];
   const pinCount = pins.length;
   const email = user.email ?? "";
   const isGuest = !email;
 
   // Both derived from pins already in hand, so they move as the collage does.
-  // `country` is optional on older pins (see instant.schema.ts), so this can
-  // undercount slightly — the label stays true either way.
+  // `country` is nullable — the lookup is best-effort at save time — so this
+  // can undercount slightly; the label stays true either way.
   const countryCount = useMemo(
     () => new Set(pins.map((pin) => pin.country).filter(Boolean)).size,
     [pins],
@@ -193,10 +184,10 @@ function ProfileContent({ user }: { user: User }) {
   useEffect(() => {
     if (isLoading || profile || creatingRef.current) return;
     creatingRef.current = true;
-    ensureProfile(user.id, email, profile).catch(() => {
+    ensureProfile(email).catch(() => {
       creatingRef.current = false;
     });
-  }, [isLoading, profile, user.id, email]);
+  }, [isLoading, profile, email]);
 
   async function changeAvatar() {
     if (!profile || uploading) return;
@@ -218,7 +209,12 @@ function ProfileContent({ user }: { user: User }) {
 
     setUploading(true);
     try {
-      await updateAvatar(user.id, profile.id, result.assets[0], profile.avatar?.id);
+      await updateAvatar(
+        user.id,
+        profile.id,
+        result.assets[0],
+        profile.avatar?.path,
+      );
       haptics.success();
     } catch (err) {
       haptics.error();

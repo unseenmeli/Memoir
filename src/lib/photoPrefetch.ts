@@ -22,9 +22,10 @@ import { Image } from "react-native";
 const MAX_PREFETCH = 40;
 
 /**
- * URLs already requested this session. Instant hands back the same URLs on
- * every query result, so without this the list would be re-requested on every
- * sync — `Image.prefetch` would dedupe against its own cache, but there's no
+ * URLs already requested this session. Signed URLs are cached by path (see
+ * `signPaths` in lib/storage.ts), so a refetch hands back the identical string
+ * and without this the whole list would be re-requested on every realtime
+ * event — `Image.prefetch` would dedupe against its own cache, but there's no
  * reason to make the call at all.
  */
 const requested = new Set<string>();

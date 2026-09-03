@@ -1,5 +1,4 @@
 import { Feather, Ionicons } from "@expo/vector-icons";
-import type { User } from "@instantdb/react-native";
 import { LinearGradient } from "expo-linear-gradient";
 import { useRouter } from "expo-router";
 import { useMemo, useState } from "react";
@@ -29,7 +28,8 @@ import { GlassView } from "@/components/GlassView";
 import { PinComposer } from "@/components/PinComposer";
 import { PinDetails, sortPhotos, type PinRecord } from "@/components/PinDetails";
 import { ScreenBackground } from "@/components/ScreenBackground";
-import { db } from "@/lib/db";
+import type { User } from "@/lib/auth";
+import { usePins } from "@/lib/data";
 import {
   distanceKm,
   formatDistance,
@@ -487,24 +487,12 @@ function FindContent({ user }: { user: User }) {
   const viewerLocation = useViewerLocation();
   const { refreshing, onRefresh } = useRefresh();
 
-  // Only the viewer's own pins — pins are private (see instant.perms.ts). The
-  // `where` mirrors the server rule rather than replacing it; `owner` stays in
-  // the query because PinDetails reads `pin.owner?.id` to decide whether to
-  // show Edit/Delete, and an unpopulated link would silently hide them.
-  const { data, isLoading } = db.useQuery({
-    pins: {
-      $: { where: { "owner.id": user.id } },
-      photos: {},
-      owner: {},
-    },
-  });
+  // Only the viewer's own pins — pins are private, and row level security is
+  // what enforces that (see the policies in supabase/migrations). This query
+  // is shared with every other screen asking the same thing.
+  const { pins, isLoading } = usePins(user.id);
 
   useBootBlocker("find", isLoading);
-
-  const pins = useMemo(
-    () => (data?.pins ?? []) as unknown as PinRecord[],
-    [data],
-  );
 
   // The query is already scoped to this user, so every pin here is theirs.
   const myPinCount = pins.length;

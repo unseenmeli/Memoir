@@ -31,9 +31,11 @@ const RESULT_LIMIT = 8;
 // throttle or block you. Browsers refuse to let scripts set User-Agent, so
 // this only applies on native, where fetch has no such restriction.
 //
-// TODO(before submitting): replace the placeholder with a real contact address
-// or project URL you actually monitor.
-const CONTACT = "REPLACE_WITH_CONTACT_EMAIL_OR_URL";
+// One address, not both maintainers', to keep the header short. It has to be
+// one somebody actually reads: it is the only warning OSM can give before
+// throttling or blocking the app, and being blocked breaks both place search
+// and the country lookup on every pin save.
+const CONTACT = "bnachkebia27@gmail.com";
 const HEADERS =
   Platform.OS === "web"
     ? undefined
@@ -164,4 +166,52 @@ export function usePlaceSearch(
   }, [query, viewerCountry]);
 
   return { results, loading };
+}
+
+const REVERSE_ENDPOINT = "https://nominatim.openstreetmap.org/reverse";
+const REVERSE_TIMEOUT_MS = 4000;
+
+/**
+ * Resolves which country a coordinate sits in (ISO 3166-1 alpha-2, uppercase).
+ *
+ * This is the only honest source for a pin's country: the viewer's IP tells
+ * you where the *phone* is, which stamps every pin someone drops abroad with
+ * their home country. `zoom=3` asks Nominatim for the country-level answer
+ * only, which is the cheapest response it can build.
+ *
+ * Best-effort like everything else here — offline, slow, or blocked all come
+ * back as null rather than throwing, because a missing country costs a search
+ * ranking boost and a profile stat, never a save.
+ */
+export async function reverseGeocodeCountry(
+  latitude: number,
+  longitude: number,
+): Promise<string | null> {
+  const params = new URLSearchParams({
+    lat: String(latitude),
+    lon: String(longitude),
+    format: "jsonv2",
+    addressdetails: "1",
+    zoom: "3",
+  });
+
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), REVERSE_TIMEOUT_MS);
+  try {
+    const response = await fetch(`${REVERSE_ENDPOINT}?${params}`, {
+      signal: controller.signal,
+      headers: HEADERS,
+    });
+    if (!response.ok) throw new Error(`HTTP ${response.status}`);
+
+    const body = (await response.json()) as Pick<NominatimHit, "address">;
+    const code = (body.address?.country_code ?? "").toUpperCase();
+    // A pin in the middle of the ocean has no country, and that's a valid
+    // answer — the column is nullable precisely for it.
+    return /^[A-Z]{2}$/.test(code) ? code : null;
+  } catch {
+    return null;
+  } finally {
+    clearTimeout(timer);
+  }
 }
