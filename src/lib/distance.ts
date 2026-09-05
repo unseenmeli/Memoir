@@ -1,6 +1,6 @@
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import * as Location from "expo-location";
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 /**
  * The viewer's position, and distances from it.
@@ -218,5 +218,9 @@ export function useLocationPermission(): {
     };
   }, [nonce]);
 
-  return { granted, refresh: () => setNonce((n) => n + 1) };
+  // Stable identity: callers put this in effect deps, and a fresh closure each
+  // render would make those effects re-subscribe on every render.
+  const refresh = useCallback(() => setNonce((n) => n + 1), []);
+
+  return { granted, refresh };
 }

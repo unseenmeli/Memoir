@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  AppState,
   Image,
   Pressable,
   ScrollView,
@@ -28,6 +29,11 @@ import {
   type User,
 } from "@/lib/auth";
 import { usePins, useProfile } from "@/lib/data";
+import {
+  hasBeenAskedForLocation,
+  requestLocationPermission,
+  useLocationPermission,
+} from "@/lib/distance";
 import { useDragToDismiss } from "@/lib/dragToDismiss";
 import { haptics } from "@/lib/haptics";
 import { getPalette, withAlpha } from "@/lib/palette";
@@ -389,6 +395,107 @@ const PRIVACY_POLICY_URL = "https://unseenmeli.github.io/NewEra/";
  * in with. Opening Settings shouldn't put a cursor in an editable name field —
  * it's a place to check who you are and get to the things you can change.
  */
+/**
+ * Offer to turn on location — but only to someone who doesn't already have it
+ * on. Once granted, this disappears rather than sitting there as a row that
+ * does nothing.
+ *
+ * Two different actions hide behind one button. If the OS prompt has never
+ * been spent, tapping asks directly. If it has (they declined, here or on the
+ * first-run screen), iOS will never show that dialog again, so the only honest
+ * move is to send them to the system settings page.
+ */
+function LocationRow() {
+  const { scheme } = useTheme();
+  const palette = getPalette(scheme);
+  const { granted, refresh } = useLocationPermission();
+  const [asked, setAsked] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    hasBeenAskedForLocation().then((value) => {
+      if (active) setAsked(value);
+    });
+    return () => {
+      active = false;
+    };
+  }, [granted]);
+
+  // Someone who leaves for iOS Settings and flips the switch comes back to a
+  // stale row otherwise — nothing re-reads permission on its own.
+  useEffect(() => {
+    const sub = AppState.addEventListener("change", (next) => {
+      if (next === "active") refresh();
+    });
+    return () => sub.remove();
+  }, [refresh]);
+
+  // Already sharing, or we haven't read the stored answer yet — nothing to
+  // offer either way.
+  if (granted || asked === null) return null;
+
+  async function enable() {
+    if (asked) {
+      // The dialog is spent; only the system settings page can change this.
+      await Linking.openSettings().catch(() => {});
+      return;
+    }
+    const ok = await requestLocationPermission();
+    if (ok) haptics.success();
+    setAsked(true);
+    refresh();
+  }
+
+  return (
+    <View className="gap-3">
+      <Text
+        style={{
+          fontSize: 11,
+          letterSpacing: 1.2,
+          fontWeight: "700",
+          textTransform: "uppercase",
+          color: palette.textDim,
+        }}
+      >
+        Location
+      </Text>
+      <Pressable
+        onPress={enable}
+        accessibilityRole="button"
+        accessibilityLabel="Share your location"
+        className="active:opacity-70"
+        style={{ borderRadius: 14, overflow: "hidden" }}
+      >
+        <GlassView radius={14} intensity={25}>
+          <View className="flex-row items-center gap-3.5 px-4 py-3.5">
+            <Feather name="map-pin" size={18} color={palette.accent} />
+            <View className="flex-1">
+              <Text
+                className="text-base font-outfit-medium"
+                style={{ color: palette.text }}
+              >
+                Share your location
+              </Text>
+              <Text
+                className="mt-0.5 text-sm font-outfit"
+                style={{ color: palette.textDim }}
+              >
+                You&apos;re on Tbilisi by default. Turn this on to see yourself
+                on the map and sort places by real distance.
+              </Text>
+            </View>
+            <Feather
+              name={asked ? "external-link" : "chevron-right"}
+              size={16}
+              color={palette.textDim}
+            />
+          </View>
+        </GlassView>
+      </Pressable>
+    </View>
+  );
+}
+
 function AccountCard({
   user,
   onEdit,
@@ -682,6 +789,8 @@ function SettingsContent({ user }: { user: User }) {
                     <AppearanceControl />
                   </View>
                 )}
+
+                {editingAccount ? null : <LocationRow />}
 
                 <View className="gap-3">
                   {/* The header already says "Account" while editing — no
