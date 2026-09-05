@@ -13,7 +13,7 @@ import { usePins } from "@/lib/data";
 import { haptics } from "@/lib/haptics";
 import { PinComposer } from "@/components/PinComposer";
 import { PinDetails, sortPhotos, type PinRecord } from "@/components/PinDetails";
-import { useViewerLocation } from "@/lib/distance";
+import { useLocationPermission, useViewerLocation } from "@/lib/distance";
 import { useMapFocus } from "@/lib/mapFocus";
 import { usePrefetchPhotos } from "@/lib/photoPrefetch";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
@@ -170,10 +170,16 @@ function PlacementPrompt({
 export function Map({
   user,
   onReady,
+  locationSettled = true,
 }: {
   user: User;
   /** Fires once the native map has laid out and the pins query has landed. */
   onReady?: () => void;
+  /**
+   * False while the location primer is still up. The opening shot waits for
+   * this so it frames against the real answer rather than the default.
+   */
+  locationSettled?: boolean;
 }) {
   const { target, clear } = useMapFocus();
   const { scheme } = useTheme();
@@ -198,6 +204,7 @@ export function Map({
   // The opening shot happens once; after that the camera belongs to the user.
   const didFrame = useRef(false);
   const viewerLocation = useViewerLocation();
+  const { granted: locationGranted } = useLocationPermission();
   // Read through a ref so the opening-shot effect below can see the pins
   // without re-running every time the list identity changes.
   const pinsRef = useRef<PinRecord[]>([]);
@@ -230,6 +237,10 @@ export function Map({
   // the camera in that case.
   useEffect(() => {
     if (!ready || !mapReady || didFrame.current || target) return;
+    // Hold the opening shot until the location question is settled. Framing
+    // early would latch `didFrame` against the Tbilisi default, so a grant
+    // moments later would never move the camera to where they actually are.
+    if (!locationSettled) return;
 
     const fitted = regionForCoords(
       pinsRef.current.map((pin) => ({
@@ -251,7 +262,7 @@ export function Map({
     didFrame.current = true;
     mapRef.current?.animateToRegion(destination, PLACEMENT_ANIM_MS);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [ready, mapReady, viewerLocation, target]);
+  }, [ready, mapReady, viewerLocation, target, locationSettled]);
 
   // "Take me to the pin": once the map is ready, pan in tight and open the
   // pin's label. Gated on `mapReady` so it also works on the map's first mount.
@@ -343,7 +354,10 @@ export function Map({
         style={{ flex: 1 }}
         initialRegion={getLastRegion()}
         onRegionChangeComplete={setLastRegion}
-        showsUserLocation
+        // Tied to the real grant rather than hardcoded true: the blue dot is
+        // drawn by MapKit itself, not by our code, so this is the only place
+        // that decision can be made honestly.
+        showsUserLocation={locationGranted}
         // Native map tiles follow the app theme — without this the map stays
         // bright white while everything around it goes dark.
         userInterfaceStyle={scheme === "dark" ? "dark" : "light"}

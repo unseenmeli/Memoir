@@ -1,3 +1,4 @@
+import { Feather } from "@expo/vector-icons";
 import { useState } from "react";
 import { Pressable, Text, TextInput, View } from "react-native";
 import {
@@ -233,6 +234,9 @@ function PasswordStep({
   const [confirm, setConfirm] = useState("");
   const [pending, setPending] = useState(false);
   const [error, setError] = useState("");
+  // Signup succeeded but there's no session — the address needs confirming
+  // from the inbox before this account can sign in.
+  const [awaitingConfirmation, setAwaitingConfirmation] = useState(false);
 
   // Two ways to end up creating a password: a new address on the login screen,
   // and a guest attaching one from Settings. Both want the confirm field.
@@ -267,7 +271,19 @@ function PasswordStep({
       } else if (registered) {
         await signInWithPassword(email, password);
       } else {
-        await signUpWithPassword(email, password);
+        const { needsEmailConfirmation } = await signUpWithPassword(
+          email,
+          password,
+        );
+        // Confirmation on means the account exists but there's no session yet.
+        // Say so plainly — the old code called onSignedIn() here and left the
+        // UI spinning for a session that was never going to arrive.
+        if (needsEmailConfirmation) {
+          haptics.success();
+          setAwaitingConfirmation(true);
+          setPending(false);
+          return;
+        }
       }
       haptics.success();
       onSignedIn?.();
@@ -283,6 +299,64 @@ function PasswordStep({
       setConfirm("");
       setPending(false);
     }
+  }
+
+  // Account created, inbox round-trip pending. This replaces the form
+  // entirely: there is nothing useful to type here until the link is clicked.
+  if (awaitingConfirmation) {
+    return (
+      <View className="gap-4">
+        <View
+          className="items-center justify-center self-center"
+          style={{
+            width: 56,
+            height: 56,
+            borderRadius: 28,
+            backgroundColor: palette.accent,
+          }}
+        >
+          <Feather name="mail" size={26} color={palette.accentFg} />
+        </View>
+
+        <View className="gap-2">
+          <Text
+            className="text-center text-2xl font-outfit-semibold tracking-tight"
+            style={{ color: palette.text }}
+          >
+            Check your email
+          </Text>
+          <Text
+            className="text-center text-base font-outfit"
+            style={{ color: palette.textDim }}
+          >
+            We sent a confirmation link to{" "}
+            <Text style={{ color: palette.text }}>{email}</Text>. Tap it, then
+            come back and sign in.
+          </Text>
+          <Text
+            className="text-center text-sm font-outfit"
+            style={{ color: palette.textDim }}
+          >
+            Not there? Check your spam folder.
+          </Text>
+        </View>
+
+        <Pressable
+          onPress={onBack}
+          accessibilityRole="button"
+          accessibilityLabel="Back to sign in"
+          className="items-center rounded-xl px-4 py-3.5 active:opacity-70"
+          style={{ backgroundColor: palette.accent }}
+        >
+          <Text
+            className="text-base font-outfit-medium"
+            style={{ color: palette.accentFg }}
+          >
+            Back to sign in
+          </Text>
+        </Pressable>
+      </View>
+    );
   }
 
   return (

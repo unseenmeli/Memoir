@@ -112,18 +112,21 @@ export async function signInWithPassword(
 }
 
 /**
- * Create a brand-new account.
+ * Create an account.
  *
- * With `enable_confirmations = false` the account is usable immediately and no
- * mail is generated, so this returns already signed in — there is no inbox
- * round-trip and no pending state to hold on to.
+ * Returns whether the caller is now signed in. With email confirmation turned
+ * on (Auth → Providers → Email → "Confirm email"), Supabase creates the user
+ * but returns NO session — the person has to click a link in their inbox
+ * first. Callers must handle that: treating signup as "you're in" leaves the
+ * UI waiting for a session that is never coming.
  */
 export async function signUpWithPassword(
   email: string,
   password: string,
-): Promise<void> {
-  const { error } = await supabase.auth.signUp({ email, password });
+): Promise<{ needsEmailConfirmation: boolean }> {
+  const { data, error } = await supabase.auth.signUp({ email, password });
   if (error) throw error;
+  return { needsEmailConfirmation: !data.session };
 }
 
 /**
@@ -241,5 +244,12 @@ export async function signOut(): Promise<void> {
  */
 export function errorMessage(err: unknown): string | undefined {
   const message = (err as { message?: unknown } | null)?.message;
-  return typeof message === "string" && message ? message : undefined;
+  if (typeof message !== "string" || !message) return undefined;
+
+  // Supabase's own wording for an unconfirmed address is "Email not
+  // confirmed", which states the problem without saying what to do about it.
+  if (/email not confirmed/i.test(message)) {
+    return "Confirm your email first — check your inbox for the link we sent.";
+  }
+  return message;
 }
