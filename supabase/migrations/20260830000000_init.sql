@@ -1,5 +1,5 @@
 -- ============================================================================
--- New Era — initial schema.
+-- Memoire — initial schema.
 --
 -- This is the Supabase equivalent of the old `instant.schema.ts` +
 -- `instant.perms.ts` pair (deleted in the migration commit — read them in git

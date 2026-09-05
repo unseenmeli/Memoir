@@ -46,7 +46,7 @@ TEMPLATE = """<!doctype html>
 <meta name="color-scheme" content="light dark">
 <meta name="theme-color" content="#ffffff" media="(prefers-color-scheme: light)">
 <meta name="theme-color" content="#010304" media="(prefers-color-scheme: dark)">
-<meta name="description" content="How New Era handles your data. Your pins are private to you.">
+<meta name="description" content="How Memoire handles your data. Your pins are private to you.">
 <title>{title}</title>
 <style>
   :root {{
@@ -266,7 +266,9 @@ TEMPLATE = """<!doctype html>
 <body>
 {body}
 <footer>
-  New Era · Contact <a href="mailto:bnachkebia27@gmail.com">bnachkebia27@gmail.com</a>
+  Memoire · Contact
+  <a href="mailto:bnachkebia27@gmail.com">bnachkebia27@gmail.com</a>
+  or <a href="mailto:unseenmeli@gmail.com">unseenmeli@gmail.com</a>
 </footer>
 </body>
 </html>

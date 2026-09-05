@@ -388,7 +388,7 @@ const DANGER = "#ef4444";
  * requires. Linking it in-app as well is for the person using the app: the
  * store listing is not somewhere you go looking once you've installed it.
  */
-const PRIVACY_POLICY_URL = "https://unseenmeli.github.io/NewEra/";
+const PRIVACY_POLICY_URL = "https://unseenmeli.github.io/Memoir/";
 
 /**
  * Read-only identity card: avatar, display name, and the address you're signed

@@ -1,8 +1,8 @@
-# Privacy Policy — New Era
+# Privacy Policy — Memoire
 
 **Last updated: 3 September 2026**
 
-New Era is a private map diary. You save places you care about, with your own
+Memoire is a private map diary. You save places you care about, with your own
 notes and photos. **Your pins are visible only to you.** There is no sharing,
 no feed, no following, and no way for another user of the app to see anything
 you save.
@@ -59,7 +59,7 @@ contact address above and we will remove it.
 
 ## Children
 
-New Era is not directed at children under 13, and we do not knowingly collect
+Memoire is not directed at children under 13, and we do not knowingly collect
 information from them.
 
 ## Data retention
