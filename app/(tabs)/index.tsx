@@ -1,9 +1,11 @@
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { StyleSheet, Text, View } from "react-native";
 import { useSafeAreaInsets } from "react-native-safe-area-context";
 import { AuthGate } from "@/components/AuthGate";
+import { LocationPrimer } from "@/components/LocationPrimer";
 import { Map } from "@/components/Map";
 import { TurbineLogo } from "@/components/TurbineLogo";
+import { hasBeenAskedForLocation } from "@/lib/distance";
 import { useBootBlocker } from "@/lib/loading";
 import { HEADER_HEIGHT, HINT_HEIGHT } from "@/lib/mapRegion";
 import { getPalette, mix } from "@/lib/palette";
@@ -24,6 +26,19 @@ export default function HomeScreen() {
   const { scheme } = useTheme();
   const palette = getPalette(scheme);
   const [mapReady, setMapReady] = useState(false);
+  // `null` while we're reading the stored answer — the primer must not flash
+  // for someone who already chose.
+  const [needsPrimer, setNeedsPrimer] = useState<boolean | null>(null);
+
+  useEffect(() => {
+    let active = true;
+    hasBeenAskedForLocation().then((asked) => {
+      if (active) setNeedsPrimer(!asked);
+    });
+    return () => {
+      active = false;
+    };
+  }, []);
 
   // Hold the boot splash until the map has drawn, so the first thing the user
   // sees is a painted map rather than a blank tile grid.
@@ -40,7 +55,11 @@ export default function HomeScreen() {
       {(user) => (
         <View className="flex-1 bg-white dark:bg-zinc-950">
           {/* Full-bleed map — fills the screen and never resizes. */}
-          <Map user={user} onReady={handleMapReady} />
+          <Map
+            user={user}
+            onReady={handleMapReady}
+            locationSettled={needsPrimer === false}
+          />
 
           {/* Logo header floats OVER the map, below the hint line. */}
           <View
@@ -73,6 +92,12 @@ export default function HomeScreen() {
               Hold to place a pin
             </Text>
           </View>
+
+          {/* First launch: explain location before the OS dialog burns its one
+              chance. Sits over the map and hides the chrome behind it. */}
+          {needsPrimer ? (
+            <LocationPrimer onDone={() => setNeedsPrimer(false)} />
+          ) : null}
         </View>
       )}
     </AuthGate>

@@ -1,4 +1,5 @@
 import type { Region } from "react-native-maps";
+import { DEFAULT_COORDS } from "./distance";
 
 /**
  * Home-screen chrome geometry. Shared so the map's floating controls can line
@@ -7,10 +8,10 @@ import type { Region } from "react-native-maps";
 export const HINT_HEIGHT = 26;
 export const HEADER_HEIGHT = 88;
 
-// Tbilisi, Georgia — the first-launch view.
+// Tbilisi, Georgia — the first-launch view. Centre comes from DEFAULT_COORDS
+// so the map and the distance readouts can't drift apart.
 export const INITIAL_REGION: Region = {
-  latitude: 41.7151,
-  longitude: 44.8271,
+  ...DEFAULT_COORDS,
   latitudeDelta: 0.0922,
   longitudeDelta: 0.0421,
 };

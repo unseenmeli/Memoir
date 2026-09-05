@@ -5,6 +5,7 @@ import { useEffect, useState } from "react";
 import {
   ActivityIndicator,
   Alert,
+  Image,
   Pressable,
   ScrollView,
   Text,
@@ -383,11 +384,118 @@ const DANGER = "#ef4444";
  */
 const PRIVACY_POLICY_URL = "https://unseenmeli.github.io/NewEra/";
 
+/**
+ * Read-only identity card: avatar, display name, and the address you're signed
+ * in with. Opening Settings shouldn't put a cursor in an editable name field —
+ * it's a place to check who you are and get to the things you can change.
+ */
+function AccountCard({
+  user,
+  onEdit,
+}: {
+  user: User;
+  onEdit: () => void;
+}) {
+  const { scheme } = useTheme();
+  const palette = getPalette(scheme);
+  const { profile } = useProfile(user.id);
+
+  const displayName =
+    profile?.displayName ?? user.email?.split("@")[0] ?? "explorer";
+  const initial = displayName.charAt(0).toUpperCase();
+  const isGuest = !user.email;
+
+  return (
+    <View className="gap-3">
+      <View style={{ borderRadius: 14, overflow: "hidden" }}>
+        <GlassView radius={14} intensity={25}>
+          <View className="flex-row items-center gap-3.5 px-4 py-3.5">
+            <View
+              style={{
+                width: 52,
+                height: 52,
+                borderRadius: 26,
+                overflow: "hidden",
+                backgroundColor: palette.surface2,
+              }}
+            >
+              {profile?.avatar?.url ? (
+                <Image
+                  source={{ uri: profile.avatar.url }}
+                  style={{ width: "100%", height: "100%" }}
+                  resizeMode="cover"
+                />
+              ) : (
+                <View className="flex-1 items-center justify-center">
+                  <Text
+                    className="text-xl font-outfit-bold"
+                    style={{ color: palette.textDim }}
+                  >
+                    {initial}
+                  </Text>
+                </View>
+              )}
+            </View>
+
+            <View className="flex-1 min-w-0">
+              <Text
+                numberOfLines={1}
+                className="text-lg font-outfit-semibold"
+                style={{ color: palette.text }}
+              >
+                {displayName}
+              </Text>
+              <Text
+                className="mt-0.5 text-xs font-outfit"
+                style={{ color: palette.textDim }}
+              >
+                {isGuest ? "Guest account" : "Signed in as"}
+              </Text>
+              {isGuest ? null : (
+                <Text
+                  numberOfLines={1}
+                  className="text-sm font-outfit"
+                  style={{ color: palette.text }}
+                >
+                  {user.email}
+                </Text>
+              )}
+            </View>
+          </View>
+        </GlassView>
+      </View>
+
+      <Pressable
+        onPress={onEdit}
+        accessibilityRole="button"
+        accessibilityLabel="Edit account info"
+        className="active:opacity-70"
+        style={{ borderRadius: 14, overflow: "hidden" }}
+      >
+        <GlassView radius={14} intensity={25}>
+          <View className="flex-row items-center justify-between px-4 py-3.5">
+            <Text
+              className="text-base font-outfit-medium"
+              style={{ color: palette.text }}
+            >
+              {isGuest ? "Save your account" : "Edit account info"}
+            </Text>
+            <Feather name="chevron-right" size={18} color={palette.textDim} />
+          </View>
+        </GlassView>
+      </Pressable>
+    </View>
+  );
+}
+
 function SettingsContent({ user }: { user: User }) {
   const router = useRouter();
   const { scheme } = useTheme();
   const palette = getPalette(scheme);
   const [deleting, setDeleting] = useState(false);
+  // Settings opens read-only; the editable fields live behind this flag so
+  // nothing is accidentally changed just by looking.
+  const [editingAccount, setEditingAccount] = useState(false);
   const { gesture: dragGesture, style: dragStyle } = useDragToDismiss(
     () => router.back(),
     !deleting,
@@ -516,16 +624,37 @@ function SettingsContent({ user }: { user: User }) {
                   </View>
 
                   <View className="flex-row items-center justify-between px-5 py-3">
-                    <Text
-                      style={{
-                        fontFamily: "Outfit_700Bold",
-                        fontSize: 24,
-                        letterSpacing: -0.4,
-                        color: palette.text,
-                      }}
-                    >
-                      Settings
-                    </Text>
+                    <View className="flex-1 flex-row items-center gap-2">
+                      {/* Editing is a sub-view, so it needs its own way back —
+                          "Done" closes the whole sheet, which isn't the same
+                          thing. */}
+                      {editingAccount ? (
+                        <Pressable
+                          onPress={() => setEditingAccount(false)}
+                          accessibilityRole="button"
+                          accessibilityLabel="Back to settings"
+                          hitSlop={10}
+                          className="active:opacity-60"
+                        >
+                          <Feather
+                            name="chevron-left"
+                            size={26}
+                            color={palette.text}
+                          />
+                        </Pressable>
+                      ) : null}
+                      <Text
+                        numberOfLines={1}
+                        style={{
+                          fontFamily: "Outfit_700Bold",
+                          fontSize: 24,
+                          letterSpacing: -0.4,
+                          color: palette.text,
+                        }}
+                      >
+                        {editingAccount ? "Account" : "Settings"}
+                      </Text>
+                    </View>
                     <HeaderPill
                       label="Done"
                       color={palette.accentFg}
@@ -537,39 +666,7 @@ function SettingsContent({ user }: { user: User }) {
               </GestureDetector>
 
               <ScrollView className="flex-1 px-5" contentContainerClassName="gap-8 pt-3 pb-10">
-                <View className="gap-3">
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      letterSpacing: 1.2,
-                      fontWeight: "700",
-                      textTransform: "uppercase",
-                      color: palette.textDim,
-                    }}
-                  >
-                    Appearance
-                  </Text>
-                  <AppearanceControl />
-                </View>
-
-                <View className="gap-3">
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      letterSpacing: 1.2,
-                      fontWeight: "700",
-                      textTransform: "uppercase",
-                      color: palette.textDim,
-                    }}
-                  >
-                    Display name
-                  </Text>
-                  <DisplayNameEditor user={user} />
-                </View>
-
-                {/* A guest has no password to change — they get the
-                    "add an email" form in Account below instead. */}
-                {isGuest ? null : (
+                {editingAccount ? null : (
                   <View className="gap-3">
                     <Text
                       style={{
@@ -580,113 +677,154 @@ function SettingsContent({ user }: { user: User }) {
                         color: palette.textDim,
                       }}
                     >
-                      Password
+                      Appearance
                     </Text>
-                    <ChangePasswordForm email={user.email ?? ""} />
+                    <AppearanceControl />
                   </View>
                 )}
 
                 <View className="gap-3">
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      letterSpacing: 1.2,
-                      fontWeight: "700",
-                      textTransform: "uppercase",
-                      color: palette.textDim,
-                    }}
-                  >
-                    Account
-                  </Text>
-                  {isGuest ? (
-                    // A guest session lives only on this device and only until
-                    // they sign out. `mode="linkEmail"` adds the address and
-                    // password to the anonymous account they already have
-                    // rather than starting a new one, so the same user id —
-                    // and every pin hanging off it — carries across.
-                    <View className="gap-3">
-                      <View style={{ borderRadius: 14, overflow: "hidden" }}>
-                        <GlassView radius={14} intensity={25}>
-                          <View className="px-4 py-3.5">
-                            <Text
-                              className="text-base font-outfit-semibold"
-                              style={{ color: palette.text }}
-                            >
-                              Guest account
-                            </Text>
-                            <Text
-                              className="mt-1 text-sm font-outfit"
-                              style={{ color: palette.textDim }}
-                            >
-                              Add an email and password so you don&apos;t lose
-                              your pins if you sign out, reinstall, or switch
-                              phones. Use an address you haven&apos;t used with
-                              this app before.
-                            </Text>
-                          </View>
-                        </GlassView>
+                  {/* The header already says "Account" while editing — no
+                      point saying it twice on the same screen. */}
+                  {editingAccount ? null : (
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        letterSpacing: 1.2,
+                        fontWeight: "700",
+                        textTransform: "uppercase",
+                        color: palette.textDim,
+                      }}
+                    >
+                      Account
+                    </Text>
+                  )}
+
+                  {editingAccount ? (
+                    <View className="gap-6">
+                      <View className="gap-3">
+                        <Text
+                          className="text-xs font-outfit-semibold"
+                          style={{ color: palette.textDim }}
+                        >
+                          Display name
+                        </Text>
+                        <DisplayNameEditor user={user} />
                       </View>
-                      <EmailPasswordForm compact mode="linkEmail" />
+
+                      {/* A guest has no password to change — they get the
+                          "add an email" form below instead. */}
+                      {isGuest ? null : (
+                        <View className="gap-3">
+                          <Text
+                            className="text-xs font-outfit-semibold"
+                            style={{ color: palette.textDim }}
+                          >
+                            Password
+                          </Text>
+                          <ChangePasswordForm email={user.email ?? ""} />
+                        </View>
+                      )}
+
+                      {isGuest ? (
+                        // A guest session lives only on this device and only
+                        // until they sign out. `mode="linkEmail"` adds the
+                        // address and password to the anonymous account they
+                        // already have rather than starting a new one, so the
+                        // same user id — and every pin hanging off it —
+                        // carries across.
+                        <View className="gap-3">
+                          <View style={{ borderRadius: 14, overflow: "hidden" }}>
+                            <GlassView radius={14} intensity={25}>
+                              <View className="px-4 py-3.5">
+                                <Text
+                                  className="text-base font-outfit-semibold"
+                                  style={{ color: palette.text }}
+                                >
+                                  Guest account
+                                </Text>
+                                <Text
+                                  className="mt-1 text-sm font-outfit"
+                                  style={{ color: palette.textDim }}
+                                >
+                                  Add an email and password so you don&apos;t
+                                  lose your pins if you sign out, reinstall, or
+                                  switch phones. Use an address you
+                                  haven&apos;t used with this app before.
+                                </Text>
+                              </View>
+                            </GlassView>
+                          </View>
+                          <EmailPasswordForm compact mode="linkEmail" />
+                        </View>
+                      ) : null}
+
+                      <Pressable
+                        onPress={() => setEditingAccount(false)}
+                        accessibilityRole="button"
+                        accessibilityLabel="Save changes and go back to settings"
+                        className="items-center rounded-xl px-4 py-3.5 active:opacity-70"
+                        style={{ backgroundColor: palette.accent }}
+                      >
+                        <Text
+                          className="text-base font-outfit-semibold"
+                          style={{ color: palette.accentFg }}
+                        >
+                          Save changes
+                        </Text>
+                      </Pressable>
                     </View>
                   ) : (
-                    <View style={{ borderRadius: 14, overflow: "hidden" }}>
-                      <GlassView radius={14} intensity={25}>
-                        <View className="px-4 py-3.5">
-                          <Text className="text-xs" style={{ color: palette.textDim }}>
-                            Signed in as
-                          </Text>
-                          <Text
-                            className="mt-0.5 text-base font-outfit"
-                            style={{ color: palette.text }}
-                          >
-                            {user.email}
-                          </Text>
-                        </View>
-                      </GlassView>
-                    </View>
+                    <AccountCard
+                      user={user}
+                      onEdit={() => setEditingAccount(true)}
+                    />
                   )}
                 </View>
 
-                <View className="gap-3">
-                  <Text
-                    style={{
-                      fontSize: 11,
-                      letterSpacing: 1.2,
-                      fontWeight: "700",
-                      textTransform: "uppercase",
-                      color: palette.textDim,
-                    }}
-                  >
-                    About
-                  </Text>
-                  <Pressable
-                    onPress={() => {
-                      // Non-fatal: no browser, or a URL that won't open, is
-                      // not worth an error dialog in Settings.
-                      void Linking.openURL(PRIVACY_POLICY_URL).catch(() => {});
-                    }}
-                    accessibilityRole="link"
-                    accessibilityLabel="Open the privacy policy in your browser"
-                    className="active:opacity-70"
-                    style={{ borderRadius: 14, overflow: "hidden" }}
-                  >
-                    <GlassView radius={14} intensity={25}>
-                      <View className="flex-row items-center justify-between px-4 py-3.5">
-                        <Text
-                          className="text-base font-outfit"
-                          style={{ color: palette.text }}
-                        >
-                          Privacy policy
-                        </Text>
-                        <Feather
-                          name="external-link"
-                          size={16}
-                          color={palette.textDim}
-                        />
-                      </View>
-                    </GlassView>
-                  </Pressable>
-                </View>
+                {editingAccount ? null : (
+                  <View className="gap-3">
+                    <Text
+                      style={{
+                        fontSize: 11,
+                        letterSpacing: 1.2,
+                        fontWeight: "700",
+                        textTransform: "uppercase",
+                        color: palette.textDim,
+                      }}
+                    >
+                      About
+                    </Text>
+                    <Pressable
+                      onPress={() => {
+                        // Non-fatal: no browser, or a URL that won't open, is
+                        // not worth an error dialog in Settings.
+                        void Linking.openURL(PRIVACY_POLICY_URL).catch(() => {});
+                      }}
+                      accessibilityRole="link"
+                      accessibilityLabel="Open the privacy policy in your browser"
+                      className="active:opacity-70"
+                      style={{ borderRadius: 14, overflow: "hidden" }}
+                    >
+                      <GlassView radius={14} intensity={25}>
+                        <View className="flex-row items-center justify-between px-4 py-3.5">
+                          <Text
+                            className="text-base font-outfit"
+                            style={{ color: palette.text }}
+                          >
+                            Privacy policy
+                          </Text>
+                          <Feather
+                            name="external-link"
+                            size={16}
+                            color={palette.textDim}
+                          />
+                        </View>
+                      </GlassView>
+                    </Pressable>
+                  </View>
+                )}
+
               </ScrollView>
 
               {/* Sign out and account deletion pinned to the bottom. */}

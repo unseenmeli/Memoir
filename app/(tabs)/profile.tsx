@@ -17,6 +17,7 @@ import { SafeAreaView } from "react-native-safe-area-context";
 import { AuthGate } from "@/components/AuthGate";
 import { GlassView } from "@/components/GlassView";
 import { PinComposer } from "@/components/PinComposer";
+import { AvatarPicker } from "@/components/AvatarPicker";
 import { PinDetails, sortPhotos, type PinRecord } from "@/components/PinDetails";
 import { ScreenBackground } from "@/components/ScreenBackground";
 import type { User } from "@/lib/auth";
@@ -153,7 +154,7 @@ function ProfileContent({ user }: { user: User }) {
   const { scheme } = useTheme();
   const palette = getPalette(scheme);
   const { refreshing, onRefresh } = useRefresh();
-  const [uploading, setUploading] = useState(false);
+  const [avatarSheet, setAvatarSheet] = useState(false);
   const [selected, setSelected] = useState<PinRecord | null>(null);
   const [editing, setEditing] = useState<PinRecord | null>(null);
   const creatingRef = useRef(false);
@@ -189,39 +190,14 @@ function ProfileContent({ user }: { user: User }) {
     });
   }, [isLoading, profile, email]);
 
-  async function changeAvatar() {
-    if (!profile || uploading) return;
-    const permission = await ImagePicker.requestMediaLibraryPermissionsAsync();
-    if (!permission.granted) {
-      Alert.alert(
-        "Photos permission needed",
-        "Allow photo access to set a profile picture.",
-      );
-      return;
-    }
-    const result = await ImagePicker.launchImageLibraryAsync({
-      mediaTypes: ["images"],
-      allowsEditing: true,
-      aspect: [1, 1],
-      quality: 0.7,
-    });
-    if (result.canceled) return;
-
-    setUploading(true);
-    try {
-      await updateAvatar(
-        user.id,
-        profile.id,
-        result.assets[0],
-        profile.avatar?.path,
-      );
-      haptics.success();
-    } catch (err) {
-      haptics.error();
-      Alert.alert("Couldn't update photo", (err as Error)?.message ?? "Try again.");
-    } finally {
-      setUploading(false);
-    }
+  /**
+   * Commits a picked image. The review sheet owns the picking, the preview and
+   * the errors — this is only the write, so the sheet can keep itself open if
+   * the upload fails.
+   */
+  async function saveAvatar(asset: ImagePicker.ImagePickerAsset) {
+    if (!profile) throw new Error("Your profile isn't ready yet.");
+    await updateAvatar(user.id, profile.id, asset, profile.avatar?.path);
   }
 
   function goToPinOnMap(pin: PinRecord) {
@@ -320,7 +296,7 @@ function ProfileContent({ user }: { user: User }) {
           {/* Avatar + stats */}
           <View className="flex-row items-center gap-5">
             <Pressable
-              onPress={changeAvatar}
+              onPress={() => setAvatarSheet(true)}
               accessibilityRole="button"
               accessibilityLabel="Change profile photo"
               className="active:opacity-80"
@@ -353,11 +329,6 @@ function ProfileContent({ user }: { user: User }) {
                     </Text>
                   </View>
                 )}
-                {uploading ? (
-                  <View className="absolute inset-0 items-center justify-center bg-black/40">
-                    <ActivityIndicator color="#ffffff" />
-                  </View>
-                ) : null}
               </View>
               <View
                 style={{
@@ -510,6 +481,14 @@ function ProfileContent({ user }: { user: User }) {
         pinCount={pinCount}
         onClose={() => setEditing(null)}
         onSaved={() => setEditing(null)}
+      />
+
+      <AvatarPicker
+        visible={avatarSheet}
+        currentUrl={profile?.avatar?.url}
+        initial={initial}
+        onClose={() => setAvatarSheet(false)}
+        onConfirm={saveAvatar}
       />
     </SafeAreaView>
     </ScreenBackground>
