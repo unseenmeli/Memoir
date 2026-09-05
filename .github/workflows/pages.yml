@@ -10,7 +10,7 @@
 # Source: "GitHub Actions". Until that is switched over, deploy-pages
 # fails with "Get Pages site failed". The published URL is then:
 #
-#   https://unseenmeli.github.io/NewEra/
+#   https://unseenmeli.github.io/Memoir/
 #
 # Paste that into App Store Connect (App Privacy -> Privacy Policy URL).
 name: Pages

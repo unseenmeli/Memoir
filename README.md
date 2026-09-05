@@ -1,4 +1,4 @@
-# new_era
+# Memoire
 
 iOS app — Expo (SDK 54) + Expo Router + NativeWind + Supabase.
 
@@ -97,7 +97,7 @@ The app holds no Cloudinary credential. `CLOUDINARY_API_SECRET` can sign an
 upload to any path in the account, so it lives only in the Edge Function
 environment — the client asks `cloudinary-sign` for a signature scoped to one
 asset, then posts the bytes to Cloudinary directly. Public ids are built
-server-side from the caller's verified user id (`newera/<user id>/pins/<pin
+server-side from the caller's verified user id (`memoire/<user id>/pins/<pin
 id>/<index>-<stem>`), which is the Cloudinary equivalent of the storage prefix
 rule and the only thing keeping one account out of another's namespace.
 
@@ -194,7 +194,7 @@ That second one decides the shape of the whole feature:
   calls `verifyOtp({ email, token, type: 'recovery' })`, then `updateUser`.
   Nothing leaves the app. This is much the simpler build.
 - **Without one**, you are stuck redeeming a link, and a link cannot point at
-  `newera://` -- mail opens in a browser, and a browser refuses to *redirect*
+  `memoire://` -- mail opens in a browser, and a browser refuses to *redirect*
   into a custom scheme (Safari: "the address is invalid"). That needs a hosted
   hand-off page that navigates to the scheme, plus `site_url`,
   `additional_redirect_urls`, and a provider watching the launch URL for
@@ -268,7 +268,7 @@ PRIVACY.md's placeholders.
 
 `.github/workflows/pages.yml` renders PRIVACY.md to HTML with
 `scripts/build-privacy-page.py` and deploys it to
-`https://unseenmeli.github.io/NewEra/` on every push to `main` that
+`https://unseenmeli.github.io/Memoire/` on every push to `main` that
 touches the policy. That URL goes in App Store Connect under App Privacy
 -> Privacy Policy URL.
 

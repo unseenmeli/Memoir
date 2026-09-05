@@ -23,7 +23,7 @@ project_id = "wgmbcglijhapfxvuarzl"
 # built from it. It is pinned anyway because `config push` sends the fully
 # resolved config - omitting it would overwrite the project's value with
 # the CLI default, http://127.0.0.1:3000.
-site_url = "https://unseenmeli.github.io/NewEra/"
+site_url = "https://unseenmeli.github.io/Memoir/"
 
 # "Look around first" on the login screen signs in anonymously. Without this
 # the guest button fails, and an App Review tester has no way into the app at

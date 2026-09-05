@@ -1,15 +1,15 @@
 {
   "expo": {
-    "name": "New Era",
-    "slug": "new_era",
+    "name": "Memoire",
+    "slug": "memoire",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
     "userInterfaceStyle": "automatic",
-    "scheme": "newera",
+    "scheme": "memoire",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.newera.app",
+      "bundleIdentifier": "com.memoire.app",
       "buildNumber": "1",
       "config": {
         "usesNonExemptEncryption": false
@@ -19,15 +19,24 @@
         "NSPrivacyAccessedAPITypes": [
           {
             "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryFileTimestamp",
-            "NSPrivacyAccessedAPITypeReasons": ["C617.1", "0A2A.1", "3B52.1"]
+            "NSPrivacyAccessedAPITypeReasons": [
+              "C617.1",
+              "0A2A.1",
+              "3B52.1"
+            ]
           },
           {
             "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryDiskSpace",
-            "NSPrivacyAccessedAPITypeReasons": ["E174.1", "85F4.1"]
+            "NSPrivacyAccessedAPITypeReasons": [
+              "E174.1",
+              "85F4.1"
+            ]
           },
           {
             "NSPrivacyAccessedAPIType": "NSPrivacyAccessedAPICategoryUserDefaults",
-            "NSPrivacyAccessedAPITypeReasons": ["CA92.1"]
+            "NSPrivacyAccessedAPITypeReasons": [
+              "CA92.1"
+            ]
           }
         ]
       },
@@ -37,7 +46,7 @@
       }
     },
     "android": {
-      "package": "com.newera.app",
+      "package": "com.memoire.app",
       "adaptiveIcon": {
         "backgroundColor": "#E6F4FE",
         "foregroundImage": "./assets/android-icon-foreground.png",
@@ -72,7 +81,8 @@
           "microphonePermission": false
         }
       ],
-      "expo-asset"
+      "expo-asset",
+      "./plugins/withWhenInUseLocationOnly"
     ]
   }
 }

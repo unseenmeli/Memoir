@@ -20,7 +20,7 @@ const API_SECRET = Deno.env.get("CLOUDINARY_API_SECRET") ?? "";
 
 /** Every asset this app owns sits under one root, so a stray prefix can never
  * reach assets belonging to something else sharing the Cloudinary account. */
-export const ROOT_FOLDER = "newera";
+export const ROOT_FOLDER = "memoire";
 
 /** Photos are re-encoded to JPEG before upload, so the format is knowable up
  * front — which is what lets a delivery URL be signed before the bytes move. */

@@ -23,7 +23,7 @@ const LOGO_HEIGHT = 68; // matches the wordmark's ~2:1 art
 
 const RING_SIZE = 26;
 const RING_BORDER = 2.5;
-// Sampled from the accent circle over the "i" in the NewEra wordmark.
+// Sampled from the accent circle over the "i" in the Memoire wordmark.
 const ACCENT = "#cd3f2d";
 
 /**

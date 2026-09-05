@@ -39,7 +39,7 @@ const CONTACT = "bnachkebia27@gmail.com";
 const HEADERS =
   Platform.OS === "web"
     ? undefined
-    : { "User-Agent": `NewEra/1.0 (com.newera.app; ${CONTACT})` };
+    : { "User-Agent": `Memoire/1.0 (com.memoire.app; ${CONTACT})` };
 
 type NominatimHit = {
   place_id: number;

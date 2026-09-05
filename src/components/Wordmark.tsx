@@ -1,10 +1,10 @@
 import { Image, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
 import { useTheme } from "@/lib/theme";
 
-const LOGO = require("../../assets/newera.png");
+const LOGO = require("../../assets/memoire.png");
 
 /**
- * The NewEra wordmark, legible on either background.
+ * The Memoire wordmark, legible on either background.
  *
  * The artwork is near-black ink (#1f1f1f), which all but disappears on the
  * dark theme's #09090b. In dark mode we overlay a white-tinted copy drawn from
@@ -29,7 +29,7 @@ export function Wordmark({
         source={LOGO}
         style={size}
         resizeMode="contain"
-        accessibilityLabel="NewEra"
+        accessibilityLabel="Memoire"
       />
       {scheme === "dark" ? (
         <Image
