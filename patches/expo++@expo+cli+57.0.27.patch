@@ -1,0 +1,15 @@
+diff --git a/node_modules/expo/node_modules/@expo/cli/build/src/start/server/AsyncNgrok.js b/node_modules/expo/node_modules/@expo/cli/build/src/start/server/AsyncNgrok.js
+index cb531ed..e45c17a 100644
+--- a/node_modules/expo/node_modules/@expo/cli/build/src/start/server/AsyncNgrok.js
++++ b/node_modules/expo/node_modules/@expo/cli/build/src/start/server/AsyncNgrok.js
+@@ -96,7 +96,9 @@ const NGROK_CONFIG = {
+     authToken: '5W1bR67GNbWcXqmxZzBG1_56GezNeaX6sSRvn8npeQ8',
+     domain: 'exp.direct'
+ };
+-const TUNNEL_TIMEOUT = 10 * 1000;
++// Patched (see patches/): ngrok retries through the corporate TLS proxy push
++// connect time to ~8.5s, so the stock 10s limit failed intermittently.
++const TUNNEL_TIMEOUT = 30 * 1000;
+ class AsyncNgrok {
+     constructor(projectRoot, port){
+         this.projectRoot = projectRoot;

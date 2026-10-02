@@ -4,7 +4,7 @@
     "slug": "memoire",
     "version": "1.0.0",
     "orientation": "portrait",
-    "icon": "./assets/icon.png",
+    "icon": "./assets/memoire-icon-1024.png",
     "userInterfaceStyle": "automatic",
     "scheme": "memoire",
     "ios": {
@@ -48,7 +48,7 @@
     "android": {
       "package": "com.memoire.app",
       "adaptiveIcon": {
-        "backgroundColor": "#E6F4FE",
+        "backgroundColor": "#22596A",
         "foregroundImage": "./assets/android-icon-foreground.png",
         "backgroundImage": "./assets/android-icon-background.png",
         "monochromeImage": "./assets/android-icon-monochrome.png"
@@ -67,9 +67,9 @@
           "image": "./assets/splash-icon.png",
           "imageWidth": 200,
           "resizeMode": "contain",
-          "backgroundColor": "#ffffff",
+          "backgroundColor": "#22596A",
           "dark": {
-            "backgroundColor": "#010304"
+            "backgroundColor": "#22596A"
           }
         }
       ],

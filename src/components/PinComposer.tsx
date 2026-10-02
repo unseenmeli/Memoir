@@ -483,7 +483,7 @@ export function PinComposer({
                   <View
                     pointerEvents="none"
                     style={{
-                      ...StyleSheet.absoluteFillObject,
+                      ...StyleSheet.absoluteFill,
                       borderRadius: 16,
                       borderWidth: 1.5,
                       borderColor:

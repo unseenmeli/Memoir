@@ -18,13 +18,13 @@ const SPIN_DURATION = 900; // one revolution of the ring
 const INTRO_DURATION = 520; // logo settling in on first paint
 const FADE_DURATION = 380; // layer lifting once everything is ready
 
-const LOGO_WIDTH = 250;
-const LOGO_HEIGHT = 68; // matches the wordmark's ~2:1 art
+const LOGO_WIDTH = 500;
+const LOGO_HEIGHT = 136; // matches the wordmark's ~2:1 art
 
 const RING_SIZE = 26;
 const RING_BORDER = 2.5;
 // Sampled from the accent circle over the "i" in the Memoire wordmark.
-const ACCENT = "#cd3f2d";
+const ACCENT = "#C0C0C0";
 
 /**
  * Startup splash: the wordmark holds still while a small accent ring spins
@@ -54,8 +54,8 @@ export function LoadingScreen() {
       withRepeat(
         withTiming(1, { duration: SPIN_DURATION, easing: Easing.linear }),
         -1,
-        false,
-      ),
+        false
+      )
     );
     return () => {
       cancelAnimation(spin);
@@ -71,7 +71,7 @@ export function LoadingScreen() {
       { duration: FADE_DURATION, easing: Easing.out(Easing.ease) },
       (finished) => {
         if (finished) runOnJS(setVisible)(false);
-      },
+      }
     );
   }, [booting, fade]);
 
@@ -92,9 +92,9 @@ export function LoadingScreen() {
 
   if (!visible) return null;
 
-  const background = scheme === "dark" ? "#09090b" : "#ffffff";
+  const background = scheme === "dark" ? "#2596be" : "#ffffff";
   // The ring's "track" — the faint part the accent arc travels around.
-  const track = scheme === "dark" ? "#27272a" : "#e4e4e7";
+  const track = scheme === "dark" ? "#ffffff" : "#000000";
 
   return (
     <Animated.View

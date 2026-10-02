@@ -1,7 +1,13 @@
-import { Image, StyleSheet, View, type StyleProp, type ViewStyle } from "react-native";
+import {
+  Image,
+  StyleSheet,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from "react-native";
 import { useTheme } from "@/lib/theme";
 
-const LOGO = require("../../assets/memoire.png");
+const LOGO = require("../../assets/splash-icon.png");
 
 /**
  * The Memoire wordmark, legible on either background.

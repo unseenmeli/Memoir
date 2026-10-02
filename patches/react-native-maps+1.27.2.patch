@@ -1,8 +1,8 @@
 diff --git a/node_modules/react-native-maps/ios/AirMaps/AIRMapMarker.m b/node_modules/react-native-maps/ios/AirMaps/AIRMapMarker.m
-index 8c17ac7..6f59c67 100644
+index 89dfd9a..49e465c 100644
 --- a/node_modules/react-native-maps/ios/AirMaps/AIRMapMarker.m
 +++ b/node_modules/react-native-maps/ios/AirMaps/AIRMapMarker.m
-@@ -289,7 +289,10 @@ NSInteger const AIR_CALLOUT_OPEN_ZINDEX_BASELINE = 999;
+@@ -314,7 +314,10 @@ NSInteger const AIR_CALLOUT_OPEN_ZINDEX_BASELINE = 999;
      _calloutIsOpen = NO;
      [self setZIndex:_zIndexBeforeOpen];
      // hide the callout view
