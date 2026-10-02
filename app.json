@@ -9,8 +9,7 @@
     "scheme": "memoire",
     "ios": {
       "supportsTablet": false,
-      "bundleIdentifier": "com.memoire.app",
-      "buildNumber": "1",
+      "bundleIdentifier": "com.jsventures.memoire",
       "config": {
         "usesNonExemptEncryption": false
       },
@@ -83,6 +82,13 @@
       ],
       "expo-asset",
       "./plugins/withWhenInUseLocationOnly"
-    ]
+    ],
+    "extra": {
+      "router": {},
+      "eas": {
+        "projectId": "ce00c61c-5d69-4104-9e70-0597c72162c9"
+      }
+    },
+    "owner": "unseenmeli"
   }
 }
