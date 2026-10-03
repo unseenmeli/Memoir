@@ -1,3 +1,4 @@
+import { File } from "expo-file-system";
 import { ImageManipulator, SaveFormat } from "expo-image-manipulator";
 import { supabase } from "./supabase";
 
@@ -21,16 +22,6 @@ import { supabase } from "./supabase";
 const MAX_PHOTO_EDGE = 1600;
 const PHOTO_QUALITY = 0.75;
 
-/**
- * Everything is re-encoded to JPEG on the way up.
- *
- * One format is one fewer thing that can render as a grey box — the camera
- * roll hands over HEIC among other things. It is also what makes the delivery
- * URL predictable enough to sign before the upload happens, since the file
- * extension is half of what gets signed.
- */
-const PHOTO_CONTENT_TYPE = "image/jpeg";
-
 export type UploadedPhoto = {
   /** Cloudinary public id. Stored as `pin_photos.path`. */
   publicId: string;
@@ -48,10 +39,15 @@ type SignedUpload = {
 /**
  * Resizes and re-encodes a picked image, returning a local file URI.
  *
- * Deliberately not the base64 path `readImageBytes` takes for avatars: this
- * hands the URI straight to `FormData`, so a multi-megabyte photo is streamed
- * off disk by the networking layer instead of being materialized as a base64
- * string a third larger than the image and then decoded back into bytes.
+ * Everything is re-encoded to JPEG on the way up. One format is one fewer
+ * thing that can render as a grey box — the camera roll hands over HEIC among
+ * other things. It is also what makes the delivery URL predictable enough to
+ * sign before the upload happens, since the file extension is half of what
+ * gets signed.
+ *
+ * Deliberately not the base64 path `readImageBytes` takes for avatars: the
+ * file goes into `FormData` as raw bytes rather than as a base64 string a
+ * third larger than the image that then has to be decoded back.
  */
 async function encodePhoto(
   uri: string,
@@ -115,13 +111,11 @@ export async function uploadPinPhoto(
   for (const [key, value] of Object.entries(signed.fields)) {
     form.append(key, String(value));
   }
-  // React Native's FormData takes this shape for a file and streams it from
-  // disk; a Blob would be posted with bytes RN never materializes.
-  form.append("file", {
-    uri,
-    name: `${signed.publicId.split("/").pop()}.jpg`,
-    type: PHOTO_CONTENT_TYPE,
-  } as unknown as Blob);
+  // Since SDK 57 the global `fetch` is `expo/fetch`, which rejects React
+  // Native's `{ uri, name, type }` file part with "Unsupported FormDataPart
+  // implementation". An expo-file-system `File` is the part it does accept: it
+  // exposes `bytes()`, `name` and `type`, so the encoded JPEG goes up as-is.
+  form.append("file", new File(uri) as unknown as Blob);
 
   const response = await fetch(signed.uploadUrl, { method: "POST", body: form });
   if (!response.ok) {

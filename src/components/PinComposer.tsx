@@ -206,7 +206,12 @@ export function PinComposer({
     setTagDraft("");
     if (!next || tags.includes(next) || tags.length >= MAX_TAGS_PER_PIN) return;
     haptics.selection();
-    setTags((prev) => [...prev, next]);
+    // Tapping a suggestion blurs the field, so onBlur and onPress can both
+    // commit the same tag in one tick against the same stale `tags`. Re-check
+    // against the latest list or the chip row renders it twice.
+    setTags((prev) =>
+      prev.includes(next) || prev.length >= MAX_TAGS_PER_PIN ? prev : [...prev, next],
+    );
   }
 
   function removeTag(tag: string) {
