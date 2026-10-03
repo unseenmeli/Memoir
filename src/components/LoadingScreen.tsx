@@ -15,7 +15,7 @@ import { useLoading } from "@/lib/loading";
 import { useTheme } from "@/lib/theme";
 
 const SPIN_DURATION = 900; // one revolution of the ring
-const INTRO_DURATION = 520; // logo settling in on first paint
+const INTRO_DURATION = 340; // logo settling in on first paint
 const FADE_DURATION = 380; // layer lifting once everything is ready
 
 const LOGO_WIDTH = 500;
@@ -92,7 +92,7 @@ export function LoadingScreen() {
 
   if (!visible) return null;
 
-  const background = scheme === "dark" ? "#2596be" : "#ffffff";
+  const background = scheme === "dark" ? "#386F7D" : "#ffffff";
   // The ring's "track" — the faint part the accent arc travels around.
   const track = scheme === "dark" ? "#ffffff" : "#000000";
 
