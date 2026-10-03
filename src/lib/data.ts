@@ -1,4 +1,5 @@
 import type { RealtimeChannel } from "@supabase/supabase-js";
+import { examplePhotos } from "./examples";
 import { clearSignedUrls, signPaths } from "./storage";
 import { Query, useQuery } from "./store";
 import { supabase } from "./supabase";
@@ -103,6 +104,12 @@ async function fetchPins(userId: string): Promise<PinRecord[]> {
     ),
   );
 
+  // Guests' sample pins carry no photo rows; their pictures come from the app
+  // bundle instead (see `examplePhotos`). Checked against the session so a
+  // real account never has a photo invented for it.
+  const { data: auth } = await supabase.auth.getSession();
+  const isGuest = auth.session?.user.is_anonymous === true;
+
   return rows.map((row) => ({
     id: row.id,
     name: row.name,
@@ -113,18 +120,23 @@ async function fetchPins(userId: string): Promise<PinRecord[]> {
     tags: row.tags ?? [],
     createdAt: Date.parse(row.created_at),
     owner: { id: row.owner_id },
-    photos: (row.pin_photos ?? [])
-      .map((photo) => ({
-        id: photo.id,
-        path: photo.path,
-        url:
-          photo.provider === "cloudinary"
-            ? (photo.url ?? "")
-            : (urls.get(photo.path) ?? ""),
-      }))
-      // A row whose object has gone missing would render as a broken frame;
-      // dropping it costs that one photo instead.
-      .filter((photo) => photo.url),
+    photos: [
+      ...(isGuest
+        ? examplePhotos({ name: row.name, description: row.description ?? "" })
+        : []),
+      ...(row.pin_photos ?? [])
+        .map((photo) => ({
+          id: photo.id,
+          path: photo.path,
+          url:
+            photo.provider === "cloudinary"
+              ? (photo.url ?? "")
+              : (urls.get(photo.path) ?? ""),
+        }))
+        // A row whose object has gone missing would render as a broken frame;
+        // dropping it costs that one photo instead.
+        .filter((photo) => photo.url),
+    ],
   }));
 }
 
